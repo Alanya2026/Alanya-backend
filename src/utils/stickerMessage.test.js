@@ -119,7 +119,15 @@ const contentDe = (o) => JSON.stringify({ v: 1, pack: 'mboa', sid: 4812, emoji: 
   await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'brouillon');
   await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, installed: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'archivé non installé');
   await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, installed: 1 } }));
-  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 1 } })), 'STICKER_PACK_UNAVAILABLE', 'pack perso (V1b)');
+  // Pack perso : le propriétaire oui, les autres non.
+  await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 1, owner_id: 7 } }));
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 1, owner_id: 9 } })), 'STICKER_PACK_UNAVAILABLE', 'pack perso d\'un autre');
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 1 } })), 'STICKER_PACK_UNAVAILABLE', 'pack perso sans propriétaire lisible');
+  // Pack partagé : installé oui, sinon non.
+  await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 2, installed: 1 } }));
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 2, installed: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'pack partagé non installé');
+  // Visibilité inconnue : refus.
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 3 } })), 'STICKER_PACK_UNAVAILABLE', 'visibilité inconnue');
   assert.strictEqual((await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'statut')).status, 404);
 
   // ── Verrou Plus : gratuit/Plus × abonné × PLUS/TRIAL × base indisponible ──

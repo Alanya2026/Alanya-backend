@@ -25,7 +25,7 @@ const MAX_PACKS_INSTALLES = 50;
 async function chargeStickerPourEnvoi(sid, senderID, db = pool) {
   const [rows] = await db.execute(
     `SELECT s.id AS sid, s.emoji, s.pack_id,
-            p.code AS pack_code, p.is_premium, p.visibility, p.status AS pack_status,
+            p.code AS pack_code, p.is_premium, p.visibility, p.status AS pack_status, p.owner_id,
             a.status AS asset_status, a.storage_key, a.width, a.height, a.animated,
             EXISTS(SELECT 1 FROM user_sticker_pack u
                     WHERE u.alanyaID = ? AND u.pack_id = p.id) AS installed

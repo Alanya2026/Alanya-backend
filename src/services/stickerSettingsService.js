@@ -71,6 +71,15 @@ function stickersOuverts(settings) {
 }
 
 /**
+ * La CRÉATION (V1b) est-elle ouverte ? Deux interrupteurs, jamais un seul :
+ * `enabled` ferme tout, `creation_enabled` ne fait qu'ajouter la création.
+ * Fonction pure, testée sans base.
+ */
+function creationOuverte(settings) {
+  return stickersOuverts(settings) && Number(settings?.creation_enabled) === 1;
+}
+
+/**
  * Réglage global, en cache 30 s par instance.
  *
  * @throws {StickerSettingsInaccessibles} lecture en échec — rien n'est mis en
@@ -104,11 +113,18 @@ async function peutUtiliserStickers() {
   return stickersOuverts(await getStickerSettings());
 }
 
+/** La création de stickers est-elle ouverte (V1b) ? */
+async function peutCreerStickers() {
+  return creationOuverte(await getStickerSettings());
+}
+
 module.exports = {
   DEFAULTS,
   StickerSettingsInaccessibles,
   stickersOuverts,
+  creationOuverte,
   getStickerSettings,
   invalidateStickerSettings,
   peutUtiliserStickers,
+  peutCreerStickers,
 };

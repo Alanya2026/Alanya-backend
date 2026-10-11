@@ -442,8 +442,8 @@ async function listReports(db = pool) {
   return rows;
 }
 
-async function takedownAsset(assetId, db = pool) {
-  const [rows] = await db.execute('SELECT id FROM sticker_asset WHERE id = ? LIMIT 1', [assetId]);
+async function takedownAsset(assetId, { by } = {}, db = pool) {
+  const [rows] = await db.execute('SELECT id, sha256 FROM sticker_asset WHERE id = ? LIMIT 1', [assetId]);
   if (!rows.length) throw refus('STICKER_NOT_FOUND', 'Actif introuvable', 404);
   await db.execute('UPDATE sticker_asset SET status = 1 WHERE id = ?', [assetId]);
   await db.execute('UPDATE sticker_report SET status = 1 WHERE asset_id = ?', [assetId]);
@@ -454,6 +454,11 @@ async function takedownAsset(assetId, db = pool) {
         SET p.version = p.version + 1
       WHERE s.asset_id = ?`,
     [assetId],
+  );
+  // Empreinte bloquée : un ré-upload identique est refusé partout (pipeline §4).
+  await db.execute(
+    'INSERT IGNORE INTO sticker_blocklist (sha256, reason, created_by) VALUES (?, ?, ?)',
+    [rows[0].sha256, 'retrait admin', Number(by) || null],
   );
   return { ok: true };
 }

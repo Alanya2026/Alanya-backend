@@ -230,7 +230,7 @@ const listReports = async (_req, res) => {
 
 const takedownAsset = async (req, res) => {
   try {
-    const r = await admin.takedownAsset(Number(req.params.id));
+    const r = await admin.takedownAsset(Number(req.params.id), { by: req.user?.alanyaID });
     return res.json(r);
   } catch (e) {
     return repondreErreur(res, e, 'takedownAsset');

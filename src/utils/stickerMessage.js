@@ -168,15 +168,24 @@ async function prepareStickerMessage({ content, senderID }, deps = depsParDefaut
   // le marqueur « Sticker retiré » côté application.
   if (Number(s.asset_status) !== 0) throw refus('STICKER_NOT_FOUND');
 
-  // V1a : packs officiels seulement. Les packs perso (visibilité 1 et 2) sont
-  // livrés avec V1b et son interrupteur `creation_enabled`.
-  if (Number(s.visibility) !== PACK_VISIBILITY.OFFICIEL) throw refus('STICKER_PACK_UNAVAILABLE');
+  const visibilite = Number(s.visibility);
   const statut = Number(s.pack_status);
   const installe = Number(s.installed) === 1;
-  // Publié : ouvert. Archivé : ouvert à qui l'a déjà installé (décision 9) —
-  // un pack qu'on retire du catalogue ne casse pas les habitudes de ses
-  // utilisateurs. Brouillon : jamais.
-  if (statut !== PACK_STATUS.PUBLIE && !(statut === PACK_STATUS.ARCHIVE && installe)) {
+  if (visibilite === PACK_VISIBILITY.OFFICIEL) {
+    // Publié : ouvert. Archivé : ouvert à qui l'a déjà installé (décision 9) —
+    // un pack qu'on retire du catalogue ne casse pas les habitudes de ses
+    // utilisateurs. Brouillon : jamais.
+    if (statut !== PACK_STATUS.PUBLIE && !(statut === PACK_STATUS.ARCHIVE && installe)) {
+      throw refus('STICKER_PACK_UNAVAILABLE');
+    }
+  } else if (visibilite === PACK_VISIBILITY.PRIVE) {
+    // Pack perso : seul son propriétaire peut envoyer ses stickers.
+    if (Number(s.owner_id) !== Number(senderID)) throw refus('STICKER_PACK_UNAVAILABLE');
+  } else if (visibilite === PACK_VISIBILITY.LIEN) {
+    // Pack partagé (V1b/T6) : il faut l'avoir installé.
+    if (!installe) throw refus('STICKER_PACK_UNAVAILABLE');
+  } else {
+    // Visibilité inconnue : refus, jamais une ouverture par défaut.
     throw refus('STICKER_PACK_UNAVAILABLE');
   }
 

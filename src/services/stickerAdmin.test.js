@@ -165,6 +165,21 @@ function db(handlers) {
     assert.ok('enabled' in r, 'retour = relecture des réglages');
   });
 
+  test('takedownAsset retire ET bloque l\'empreinte', async () => {
+    const sha = 'a'.repeat(64);
+    const d = db([[/SELECT id, sha256 FROM sticker_asset WHERE id = \?/i, () => [[{ id: 3, sha256: sha }], []]]]);
+    await admin.takedownAsset(3, { by: 42 }, d);
+    assert.ok(d.requetes.some(([s]) => /UPDATE sticker_asset SET status = 1/i.test(s)));
+    const blocage = d.requetes.find(([s]) => /INSERT IGNORE INTO sticker_blocklist/i.test(s));
+    assert.ok(blocage, 'empreinte bloquée');
+    assert.deepStrictEqual(blocage[1], [sha, 'retrait admin', 42]);
+  });
+
+  test('takedownAsset : actif inconnu → 404', async () => {
+    const d = db([[/SELECT id, sha256 FROM sticker_asset WHERE id = \?/i, () => [[], []]]]);
+    await attendErreur(() => admin.takedownAsset(999, {}, d), 'STICKER_NOT_FOUND');
+  });
+
   for (const [nom, fn] of tests) {
     try {
       await fn();
