@@ -15,6 +15,7 @@ const getPreferredContacts = async (req, res) => {
          pc.created_at,
          pc.added_via,
          pc.added_note,
+         pc.custom_name,
          u.alanyaID,
          u.nom,
          u.pseudo,
@@ -58,6 +59,7 @@ const getPreferredContacts = async (req, res) => {
         addedAt:       r.created_at,
         addedVia:      r.added_via,
         addedNote:     r.added_note,
+        customName:    r.custom_name,
         alanyaID:      r.alanyaID,
         nom:           r.nom,
         pseudo:        r.pseudo,
@@ -145,6 +147,36 @@ const setContactNote = async (req, res) => {
   }
 };
 
+// Nom personnalisé d'un contact préféré — le nom sous lequel JE l'enregistre.
+// Vide ou absent = effacement (retour au nom du profil). Comme la note, il
+// appartient à la RELATION : privé, jamais renvoyé à l'autre.
+const setContactName = async (req, res) => {
+  try {
+    const alanyaID = req.user.alanyaID;
+    const friendID = parseInt(req.params.id, 10);
+    if (!friendID || isNaN(friendID)) {
+      return res.status(400).json({ error: 'Invalid user ID', code: 'INVALID_USER' });
+    }
+
+    const brute = req.body?.name;
+    // Un nom tient sur une ligne : retours et tabulations deviennent des espaces.
+    const name = brute == null ? '' : String(brute).replace(/\s+/g, ' ').trim().slice(0, 60);
+
+    const [result] = await pool.execute(
+      'UPDATE preferredContact SET custom_name = ? WHERE alanyaID = ? AND idFriend = ?',
+      [name === '' ? null : name, alanyaID, friendID]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Not a preferred contact', code: 'INVALID_CONTACT' });
+    }
+
+    res.json({ ok: true, customName: name === '' ? null : name });
+  } catch (error) {
+    console.error('[setContactName] ERROR:', error);
+    res.status(500).json({ error: 'Erreur interne', code: 'INTERNAL' });
+  }
+};
+
 // Supprimer un contact préféré 
 const removePreferredContact = async (req, res) => {
   try {
@@ -207,4 +239,5 @@ module.exports = {
   removePreferredContact,
   checkIsContact,
   setContactNote,
+  setContactName,
 };

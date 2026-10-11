@@ -7,6 +7,7 @@ const {
   removePreferredContact,
   checkIsContact,
   setContactNote,
+  setContactName,
 } = require('../controllers/preferredContactController');
 
 /**
@@ -116,6 +117,38 @@ router.post('/:id',      auth, addPreferredContact);
  *         description: Pas un contact préféré
  */
 router.put('/:id/note',  auth, setContactNote);
+
+/**
+ * @swagger
+ * /api/contacts/{id}/name:
+ *   put:
+ *     summary: Pose ou remplace le nom personnalisé d'un contact préféré
+ *     tags: [Contacts]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 maxLength: 60
+ *                 description: Vide ou absent pour revenir au nom du profil
+ *     responses:
+ *       200:
+ *         description: Nom enregistré
+ *       404:
+ *         description: Pas un contact préféré
+ */
+router.put('/:id/name',  auth, setContactName);
 router.delete('/:id',    auth, removePreferredContact);
 
 module.exports = router;
