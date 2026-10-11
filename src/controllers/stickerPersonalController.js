@@ -16,12 +16,15 @@
  */
 
 const persist = require('../services/stickerPersonalService');
+const { FORMES, FORME_DEFAUT } = require('../utils/stickerAnime');
 const { emitStickersSync } = require('../services/stickerSync');
 const { fail, failInternal } = require('../utils/apiError');
 
 /** Codes du service, tous porteurs d'un statut HTTP de contrat. */
 const repondreErreur = (res, e, contexte) => {
   if (e && typeof e.code === 'string' && Number.isInteger(e.status)) {
+    // Refus de capacité (V1c, 503 retryable) : le client sait quand rejouer.
+    if (Number.isInteger(e.retryAfterS)) res.set('Retry-After', String(e.retryAfterS));
     return fail(res, e.status, e.code, e.message, e.feature ? { feature: e.feature } : undefined);
   }
   console.error(`[stickers] ${contexte}`, e);
@@ -69,6 +72,49 @@ async function postAsset(req, res) {
     });
   } catch (e) {
     return repondreErreur(res, e, 'postAsset');
+  }
+}
+
+/**
+ * POST /api/stickers/assets/animated — crée un sticker ANIMÉ (V1c, contrat §4c).
+ *
+ * Champ `file` : GIF ou WebP animé, ≤ 3 Mo. Options : `shape` (`cercle` |
+ * `carre-arrondi` | `carre`, défaut `carre-arrondi`), `packId`, `emoji`, `nom`.
+ * Gardes posées par la route AVANT multer : `enabled`, `creation_enabled`,
+ * `animated_enabled` (404 générique), puis 10 créations par heure et par compte.
+ * Le serveur convertit (un encodage à la fois par processus) : un `503
+ * SERVICE_UNAVAILABLE` retryable dit « file pleine », jamais un échec définitif.
+ */
+async function postAssetAnime(req, res) {
+  try {
+    const forme = req.body?.shape == null || req.body.shape === '' ? FORME_DEFAUT : req.body.shape;
+    if (typeof forme !== 'string' || !FORMES.includes(forme)) {
+      return fail(res, 400, 'STICKER_INVALID_PAYLOAD', 'shape : cercle, carre-arrondi ou carre');
+    }
+    if (!Buffer.isBuffer(req.file?.buffer) || req.file.buffer.length === 0) {
+      return fail(res, 422, 'STICKER_ASSET_INVALID', 'Fichier GIF ou WebP animé requis');
+    }
+    const r = await persist.creerStickerPersoAnime({
+      buffer: req.file.buffer,
+      alanyaID: req.user.alanyaID,
+      packId: packIdDe(req.body?.packId),
+      emoji: req.body?.emoji ?? null,
+      nom: req.body?.nom ?? null,
+      forme,
+    });
+    syncPacks(req, req.user.alanyaID);
+    return res.status(201).json({
+      assetId: r.assetId,
+      stickerId: r.stickerId,
+      packId: r.packId,
+      reutilise: r.reutilise,
+      animated: true,
+      bytes: r.bytes,
+      frames: r.frames,
+      durationMs: r.durationMs,
+    });
+  } catch (e) {
+    return repondreErreur(res, e, 'postAssetAnime');
   }
 }
 
@@ -194,6 +240,7 @@ async function postPack(req, res) {
 
 module.exports = {
   postAsset,
+  postAssetAnime,
   deleteAsset,
   postAssetCopy,
   postReport,

@@ -9,8 +9,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const fix = (nom) => require(path.join(__dirname, '..', 'testUtils', 'stickers', nom));
-const { presentCatalog, presentPack, presentMe } = require('../utils/stickerPresenter');
-const { stickersOuverts, DEFAULTS } = require('./stickerSettingsService');
+const { presentCatalog, presentPack, presentMe, presentMesPacks, presentPartage } = require('../utils/stickerPresenter');
+const {
+  stickersOuverts, creationOuverte, animesOuverts, creationAnimeeOuverte, DEFAULTS,
+} = require('./stickerSettingsService');
 const { syncPayload, emitStickersSync, emitStickersSyncAll, REASONS } = require('./stickerSync');
 const storage = require('./mediaStorage');
 const { expiredMediaWhere } = require('./mediaRetention');
@@ -69,6 +71,45 @@ const memesCles = (a, b, msg) => assert.deepStrictEqual(Object.keys(a).sort(), O
   // inertes : elles n'ouvrent ni ne ferment quoi que ce soit.
   assert.strictEqual(stickersOuverts({ enabled: 0, cohort_percent: 100, cohort_ids: '[7]' }), false);
   assert.strictEqual(stickersOuverts({ enabled: 1, cohort_percent: 0, cohort_ids: '[]' }), true);
+}
+
+// ── V1c : interrupteur `animated_enabled`, `features`, omission des animés ────
+{
+  assert.strictEqual(animesOuverts(DEFAULTS), false, 'défaut : fermé');
+  assert.strictEqual(animesOuverts({ enabled: 1 }), false, 'animated_enabled absent : fermé');
+  assert.strictEqual(animesOuverts({ enabled: 1, animated_enabled: 1 }), true);
+  assert.strictEqual(animesOuverts({ enabled: 0, animated_enabled: 1 }), false, '`enabled` ferme tout');
+  assert.strictEqual(animesOuverts({ enabled: 1, animated_enabled: '1' }), true, 'TINYINT rendu en chaîne');
+  assert.strictEqual(creationAnimeeOuverte({ enabled: 1, creation_enabled: 1, animated_enabled: 0 }), false);
+  assert.strictEqual(creationAnimeeOuverte({ enabled: 1, creation_enabled: 0, animated_enabled: 1 }), false, 'création fermée : animée aussi');
+  assert.strictEqual(creationAnimeeOuverte({ enabled: 0, creation_enabled: 1, animated_enabled: 1 }), false);
+  assert.strictEqual(creationAnimeeOuverte({ enabled: 1, creation_enabled: 1, animated_enabled: 1 }), true);
+  assert.strictEqual(creationOuverte({ enabled: 1, creation_enabled: 1 }), true, 'V1b inchangé');
+
+  // `features` additif : absent si non fourni (fixture me.json intacte), sinon booléens.
+  const base = { packs: [], favorites: [], version: 1 };
+  assert.ok(!('features' in presentMe(base)), 'sans features : la fixture reste exacte');
+  assert.deepStrictEqual(presentMe({ ...base, features: { creation: 1, animated: 0 } }).features, { creation: true, animated: false });
+  assert.deepStrictEqual(Object.keys(presentMe({ ...base, features: { creation: true, animated: true } })), ['version', 'packs', 'favorites', 'features']);
+
+  const fixe = { id: 1, pack_id: 9, position: 0, emoji: '😀', name_i18n: null, asset_id: 5, storage_key: 'k1', thumb_key: 't1', width: 512, height: 512, bytes: 9, animated: 0 };
+  const anime = { ...fixe, id: 2, position: 1, asset_id: 6, storage_key: 'k2', thumb_key: 't2', animated: 1 };
+  const pack = { id: 9, code: 'u_1_ab', name_i18n: { fr: 'P' }, version: 1, is_premium: 0, visibility: 1, cover_sticker_id: 2 };
+  // pack : animés omis par défaut ET quand fermé, présents quand ouvert.
+  assert.deepStrictEqual(presentPack({ pack, stickers: [fixe, anime], lang: 'fr', urlDe }).stickers.map((x) => x.id), [1], 'oubli de `animes` = fermé');
+  assert.deepStrictEqual(presentPack({ pack, stickers: [fixe, anime], lang: 'fr', urlDe, animes: false }).stickers.map((x) => x.id), [1]);
+  const ouvert = presentPack({ pack, stickers: [fixe, anime], lang: 'fr', urlDe, animes: true });
+  assert.deepStrictEqual(ouvert.stickers.map((x) => [x.id, x.animated]), [[1, false], [2, true]]);
+  // mes packs : liste, compteur et couverture suivent (la couverture animée disparaît).
+  const mes = presentMesPacks({ packs: [pack], stickers: [fixe, anime], lang: 'fr', urlDe });
+  assert.strictEqual(mes.packs[0].count, 1);
+  assert.deepStrictEqual(mes.packs[0].stickers.map((x) => x.id), [1]);
+  assert.strictEqual(mes.packs[0].cover, urlDe('t1'), 'couverture animée omise : repli sur le premier sticker visible');
+  assert.strictEqual(presentMesPacks({ packs: [pack], stickers: [fixe, anime], lang: 'fr', urlDe, animes: true }).packs[0].count, 2);
+  // lien de partage : idem.
+  const part = presentPartage({ pack, stickers: [fixe, anime], mine: false, addedPackId: null, lang: 'fr', urlDe });
+  assert.deepStrictEqual([part.count, part.stickers.length], [1, 1]);
+  assert.strictEqual(presentPartage({ pack, stickers: [fixe, anime], mine: false, addedPackId: null, lang: 'fr', urlDe, animes: true }).count, 2);
 }
 
 // ── stickers:sync ──────────────────────────────────────────────────────────

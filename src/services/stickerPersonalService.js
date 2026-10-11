@@ -206,8 +206,55 @@ async function creerStickerPerso({ buffer, alanyaID, packId = null, emoji = null
   await verifierPlafondPack(pack.id, db);
 
   const pret = await preparerAsset(buffer, { ownerId: alanyaID }, depsSql(db));
+  return inscrireStickerPerso({
+    pret, alanyaID, pack, emoji, nom,
+  }, db);
+}
+
+/**
+ * Dépose un sticker personnel ANIMÉ (V1c, contrat §4c) : même destination, mêmes
+ * quotas, même blocklist, même sel de clé et même idempotence que `creerStickerPerso`,
+ * mais le fichier est converti par `utils/stickerAnime` (GIF ou WebP animé → WebP
+ * animé 512×512 en forme, ≤ 3 s, ≤ 45 images, ≤ 300 Ko).
+ *
+ * L'empreinte est celle du fichier FINAL : la même conversion rendue deux fois donne
+ * le même actif (`reutilise: true`). Les rejets (poids, bombes, format) et les
+ * refus de capacité (503) se produisent AVANT toute écriture.
+ *
+ * @param {object} p
+ * @param {Buffer} p.buffer  GIF ou WebP animé, ≤ 3 Mo
+ * @param {string} [p.forme] `cercle` | `carre-arrondi` | `carre`
+ * @returns {Promise<{assetId, stickerId, packId, reutilise, bytes, animated: true,
+ *   frames: number, durationMs: number}>}
+ */
+async function creerStickerPersoAnime({
+  buffer, alanyaID, packId = null, emoji = null, nom = null, forme = undefined,
+}, db = pool, deps = {}) {
+  const pack = await packCible(alanyaID, packId, db);
+  await verifierPlafondPack(pack.id, db);
+
+  const { preparerAssetAnime } = require('../utils/stickerAnime');
+  const pret = await (deps.preparerAssetAnime || preparerAssetAnime)(
+    buffer, { ownerId: alanyaID, forme }, depsSql(db),
+  );
+  const r = await inscrireStickerPerso({
+    pret, alanyaID, pack, emoji, nom,
+  }, db);
+  return { ...r, animated: true, frames: pret.frames, durationMs: pret.durationMs };
+}
+
+/**
+ * Suite commune des dépôts (statique et animé) : transaction, actif dédupliqué par
+ * propriétaire, ligne `sticker`, fichiers sous une clé SALÉE. `pret` vient de
+ * `preparerAsset` / `preparerAssetAnime` (webp, thumb, sha256, width, height,
+ * bytes, animated).
+ */
+async function inscrireStickerPerso({
+  pret, alanyaID, pack, emoji = null, nom = null,
+}, db = pool) {
   const emojiPropre = emojiDe(emoji);
   const nameI18n = nomDe(nom);
+  const animeFlag = pret.animated ? 1 : 0;
 
   const conn = await connexionDe(db).getConnection();
   const deposes = [];
@@ -226,8 +273,8 @@ async function creerStickerPerso({ buffer, alanyaID, packId = null, emoji = null
     } else {
       const [r] = await conn.execute(
         `INSERT INTO sticker_asset (owner_id, sha256, storage_key, mime, width, height, bytes, animated)
-         VALUES (?, ?, 'pending', 'image/webp', ?, ?, ?, 0)`,
-        [alanyaID, pret.sha256, pret.width, pret.height, pret.bytes],
+         VALUES (?, ?, 'pending', 'image/webp', ?, ?, ?, ?)`,
+        [alanyaID, pret.sha256, pret.width, pret.height, pret.bytes, animeFlag],
       );
       assetId = r.insertId;
     }
@@ -273,7 +320,7 @@ async function creerStickerPerso({ buffer, alanyaID, packId = null, emoji = null
  *
  * @returns {Promise<{assetId, stickerId, packId, reutilise, copie: boolean}>}
  */
-async function copierStickerPerso({ alanyaID, assetId, packId = null, emoji = null, nom = null }, db = pool) {
+async function copierStickerPerso({ alanyaID, assetId, packId = null, emoji = null, nom = null }, db = pool, deps = {}) {
   const id = idPositif(assetId);
   const [src] = id ? await db.execute(
     `SELECT id, owner_id, sha256, storage_key, thumb_key, mime, width, height, bytes, animated, status
@@ -282,6 +329,8 @@ async function copierStickerPerso({ alanyaID, assetId, packId = null, emoji = nu
   ) : [[]];
   const source = src[0];
   if (!source || Number(source.status) !== 0) throw introuvable();
+  // Animés fermés (V1c) : un sticker animé ne se copie pas plus qu'il ne s'envoie.
+  if (Number(source.animated) === 1 && !(await animesOuvertsDe(deps))) throw introuvable();
 
   // Un retrait admin laisse l'empreinte dans la liste de blocage : on ne la
   // réintroduit pas sous une nouvelle identité.
@@ -568,6 +617,19 @@ async function resoudreAssetRecu(alanyaID, assetId, db = pool) {
   };
 }
 
+/**
+ * Animés ouverts ? Lu à l'usage (cache 30 s) ; réglages illisibles = fermé.
+ * `deps.animesOuverts` : double injectable pour les tests.
+ */
+async function animesOuvertsDe(deps = {}) {
+  try {
+    const lire = deps.animesOuverts || require('./stickerSettingsService').peutLireAnimes;
+    return Boolean(await lire());
+  } catch (_) {
+    return false;
+  }
+}
+
 /** Droits par défaut : lus à l'usage (le module de facturation est lourd). */
 const droitsParDefaut = (alanyaID) => require('./billing/entitlements').entitlementsOrNull(alanyaID);
 
@@ -606,7 +668,7 @@ async function copierStickerRecu({ alanyaID, stickerId, packId = null, emoji = n
     packId,
     emoji: String(emoji ?? '').trim() ? emoji : src.emoji,
     nom,
-  }, db);
+  }, db, deps);
 }
 
 /**
@@ -617,7 +679,7 @@ async function copierStickerRecu({ alanyaID, stickerId, packId = null, emoji = n
 async function copierAssetRecu({ alanyaID, assetId, packId = null, emoji = null, nom = null }, db = pool, deps = {}) {
   const src = await resoudreAssetRecu(alanyaID, assetId, db);
   if (src.isPremium) await verifierDroitPremium(alanyaID, deps);
-  return copierStickerPerso({ alanyaID, assetId: src.assetId, packId, emoji, nom }, db);
+  return copierStickerPerso({ alanyaID, assetId: src.assetId, packId, emoji, nom }, db, deps);
 }
 
 /**
@@ -657,9 +719,12 @@ module.exports = {
   creerPackPerso,
   packPersoParDefaut,
   creerStickerPerso,
+  creerStickerPersoAnime,
+  inscrireStickerPerso,
   copierStickerPerso,
   supprimerAssetPerso,
   signalerSticker,
+  animesOuvertsDe,
   accesStickerRecu,
   resoudreStickerRecu,
   resoudreAssetRecu,

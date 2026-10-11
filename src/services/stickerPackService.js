@@ -494,7 +494,7 @@ async function apercuPartagePublic(token, db = pool) {
  *   stickers?: number, ignores?: number}>}
  *   `deja: true` : rien de nouveau (c'est mon propre pack, ou déjà installé).
  */
-async function ajouterPackPartage(alanyaID, token, db = pool) {
+async function ajouterPackPartage(alanyaID, token, db = pool, { animes = false } = {}) {
   if (!jetonValide(token)) throw packIndisponible();
   const deposes = [];
   try {
@@ -521,7 +521,7 @@ async function ajouterPackPartage(alanyaID, token, db = pool) {
       }
 
       // 3. Les stickers copiables : actifs, fichier posé, empreinte non bloquée.
-      const [lus] = await conn.execute(
+      const [lusTous] = await conn.execute(
         `SELECT s.id, s.emoji, s.name_i18n, s.position, a.sha256, a.storage_key, a.thumb_key,
                 a.mime, a.width, a.height, a.bytes, a.animated
            FROM sticker s JOIN sticker_asset a ON a.id = s.asset_id
@@ -531,6 +531,8 @@ async function ajouterPackPartage(alanyaID, token, db = pool) {
           LIMIT ${MAX_STICKERS_PACK}`,
         [source.id],
       );
+      // Animés fermés (V1c) : ils ne s'installent pas (comptés dans `ignores`).
+      const lus = animes ? lusTous : lusTous.filter((s) => Number(s.animated) !== 1);
       if (!lus.length) throw packIndisponible();
       const [[tot]] = await conn.execute(
         'SELECT COUNT(*) AS n FROM sticker WHERE pack_id = ?',

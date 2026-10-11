@@ -131,6 +131,20 @@ const stickerShareAddLimiter = limiteStickerPartage(10, 'Trop d\'installations, 
 // Créer / révoquer un lien : 20 par minute.
 const stickerShareManageLimiter = limiteStickerPartage(20, 'Trop de modifications de lien, patientez un instant');
 
+// Création d'un sticker ANIMÉ (V1c) : 10 par heure et par compte. Chaque
+// conversion coûte 3 à 6 s de CPU, 15 s au pire (A16) : la limite protège le
+// processeur, pas le stockage. Compte tout ce qui franchit les gardes (un rejet
+// pour cause de poids a déjà coûté son CPU) ; les 404 « fermé » en amont ne
+// comptent pas. Clé par COMPTE, comme les limiteurs de partage ci-dessus.
+const stickerAnimeLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: parCompte,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de stickers animés créés, réessayez plus tard', code: 'RATE_LIMITED' },
+});
+
 module.exports = { authLimiter, registerLimiter, messageLimiter, uploadLimiter, qrResolveLimiter, generalLimiter,
   mediaReadLimiter,
   phoneCheckLimiter,
@@ -139,6 +153,7 @@ module.exports = { authLimiter, registerLimiter, messageLimiter, uploadLimiter, 
   stickerShareReadLimiter,
   stickerShareAddLimiter,
   stickerShareManageLimiter,
+  stickerAnimeLimiter,
   broadcastSendLimiter: rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 10,

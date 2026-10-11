@@ -247,6 +247,42 @@ const contentDe = (o) => JSON.stringify({ v: 1, pack: 'mboa', sid: 4812, emoji: 
     assert.notStrictEqual(f.code, e.code, 'illisible ≠ fermé');
   }
 
+  // ── V1c : `a` posé par le serveur d'après l'actif ; animés fermés → introuvable ──
+  {
+    const anime = { animated: 1 };
+    const ouvert = { animesOuverts: async () => true };
+    // Ouvert : a = 1 d'après l'actif, mediaUrl/mediaName inchangés. Le client dit a:0.
+    const r = await prepareStickerMessage({ content: contentDe({ a: 0 }), senderID: 7 }, deps({ row: anime, ...ouvert }));
+    assert.strictEqual(JSON.parse(r.content).a, 1, 'a = 1 vient de sticker_asset.animated');
+    assert.strictEqual(r.mediaUrl, 'https://<bucket>/official/stickers/mboa/4812_ab12cd34.webp');
+    assert.strictEqual(r.mediaName, 'Sticker 😂', 'mediaName / aperçu inchangés');
+    // Le client ne peut PAS poser a = 1 sur un sticker fixe.
+    const fixe = await prepareStickerMessage({ content: contentDe({ a: 1 }), senderID: 7 }, deps({ row: { animated: 0 }, ...ouvert }));
+    assert.strictEqual(JSON.parse(fixe.content).a, 0, 'a:1 du client ignoré sur un actif fixe');
+    assert.strictEqual(JSON.parse(fixe.content).w, 512);
+    // Fermé : même STICKER_NOT_FOUND (404) qu'un fichier retiré, sans code propre.
+    for (const [libelle, d] of [
+      ['animated_enabled = 0', { row: anime, animesOuverts: async () => false }],
+      ['dépendance absente (fermé par défaut)', { row: anime }],
+    ]) {
+      const e = await refus(prepareStickerMessage({ content: contentDe({ a: 1 }), senderID: 7 }, deps(d)), 'STICKER_NOT_FOUND', libelle);
+      assert.strictEqual(e.status, 404);
+    }
+    // Un sticker FIXE ne lit même pas le réglage animé.
+    let lu = 0;
+    await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ animesOuverts: async () => { lu += 1; return false; } }));
+    assert.strictEqual(lu, 0, 'sticker fixe : aucune lecture du réglage animé');
+    // Réglage illisible juste après un `ouvert` lisible : retryable, jamais terminal.
+    const ind = await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({
+      row: anime, animesOuverts: async () => { throw new Error('ECONNREFUSED'); },
+    })), 'SERVICE_UNAVAILABLE', 'réglage animé illisible');
+    assert.strictEqual(ind.status, 503);
+    // resolveStickerFields (point d'entrée des DEUX chemins d'envoi) : même règle.
+    await refus(resolveStickerFields({ type: 10, content: contentDe({}), senderID: 7 }, deps({ row: anime, animesOuverts: async () => false })), 'STICKER_NOT_FOUND', 'resolveStickerFields fermé');
+    const ok2 = await resolveStickerFields({ type: 10, content: contentDe({}), senderID: 7 }, deps({ row: anime, ...ouvert }));
+    assert.strictEqual(JSON.parse(ok2.content).a, 1);
+  }
+
   // ── Statuts alignés sur fixtures/erreurs.json ────────────────────────────
   {
     const erreurs = fix('erreurs.json');

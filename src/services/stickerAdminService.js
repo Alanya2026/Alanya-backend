@@ -252,7 +252,9 @@ async function addStickers(packId, entrees, db = pool) {
       emoji: e.emoji,
       nameI18n: e.nameI18n || null,
     });
-    crees.push({ id: r.stickerId, position, bytes: r.bytes, reutilise: r.reutilise });
+    crees.push({
+      id: r.stickerId, position, bytes: r.bytes, reutilise: r.reutilise, animated: Boolean(r.animated),
+    });
     position += 1;
   }
 

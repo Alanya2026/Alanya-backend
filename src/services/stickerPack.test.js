@@ -571,6 +571,26 @@ test('ajouterPackPartage : COPIE chez le destinataire, clés dans son espace, se
   assert.ok(!ecrit(d, /UPDATE sticker_pack SET (share_token|visibility)/));
 });
 
+test('ajouterPackPartage (V1c) : animés fermés = non installés (comptés dans `ignores`) ; ouverts = copiés avec leur indicateur', async () => {
+  videStockage();
+  const lus = [ligne(1, SHA_A), ligne(2, SHA_B, { animated: 1 })];
+  let d = baseInstall({ lus });
+  let r = await pack.ajouterPackPartage(7, JETON, d); // défaut : animés fermés
+  assert.deepStrictEqual([r.stickers, r.ignores], [1, 1], 'l\'animé est ignoré');
+  assert.strictEqual(stockage.copies.length, 2, 'un seul fichier (et sa vignette) copié');
+  assert.strictEqual(d.requetes.filter(([s]) => INS_ASSET.test(s)).length, 1);
+  // Un pack fait UNIQUEMENT d'animés : indisponible tant que c'est fermé.
+  d = baseInstall({ lus: [ligne(2, SHA_B, { animated: 1 })] });
+  await attendErreur(() => pack.ajouterPackPartage(7, JETON, d, { animes: false }), 'STICKER_PACK_UNAVAILABLE', 404);
+  // Ouvert : les deux, l'actif copié garde `animated = 1`.
+  videStockage();
+  d = baseInstall({ lus });
+  r = await pack.ajouterPackPartage(7, JETON, d, { animes: true });
+  assert.deepStrictEqual([r.stickers, r.ignores], [2, 0]);
+  const flags = d.requetes.filter(([s]) => INS_ASSET.test(s)).map(([, p]) => p[p.length - 1]);
+  assert.deepStrictEqual(flags, [0, 1]);
+});
+
 test('ajouterPackPartage : idempotent (déjà installé), et mon propre pack est un no-op', async () => {
   videStockage();
   let d = baseInstall({ source: source({ added_pack_id: 61 }) });

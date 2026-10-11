@@ -51,7 +51,9 @@ function depsSql(db = pool) {
 async function creerStickerOfficiel({
   buffer, packId, packCode, position, emoji, nameI18n = null,
 }) {
-  const pret = await preparerAsset(buffer, { ownerId: 0 }, depsSql());
+  // V1c : l'administration peut déposer un WebP animé final (aiguillé vers
+  // `utils/stickerAnime` par l'en-tête du fichier) ; un statique suit son chemin.
+  const pret = await preparerAsset(buffer, { ownerId: 0, animeAutorise: true }, depsSql());
   const conn = await pool.getConnection();
   const deposes = [];
   try {
@@ -69,8 +71,8 @@ async function creerStickerOfficiel({
     } else {
       const [r] = await conn.execute(
         `INSERT INTO sticker_asset (owner_id, sha256, storage_key, mime, width, height, bytes, animated)
-         VALUES (0, ?, 'pending', 'image/webp', ?, ?, ?, 0)`,
-        [pret.sha256, pret.width, pret.height, pret.bytes],
+         VALUES (0, ?, 'pending', 'image/webp', ?, ?, ?, ?)`,
+        [pret.sha256, pret.width, pret.height, pret.bytes, pret.animated ? 1 : 0],
       );
       assetId = r.insertId;
     }
@@ -97,7 +99,9 @@ async function creerStickerOfficiel({
     }
 
     await conn.commit();
-    return { stickerId, assetId, reutilise, bytes: pret.bytes, sha256: pret.sha256 };
+    return {
+      stickerId, assetId, reutilise, bytes: pret.bytes, sha256: pret.sha256, animated: Boolean(pret.animated),
+    };
   } catch (e) {
     await conn.rollback().catch(() => {});
     for (const key of deposes) {

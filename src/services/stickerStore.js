@@ -40,15 +40,20 @@ async function chargeStickerPourEnvoi(sid, senderID, db = pool) {
 }
 
 /** Packs officiels publiés, avec nombre de stickers actifs et vignette de couverture. */
-async function listeCatalogue(db = pool) {
+async function listeCatalogue(db = pool, { animes = false } = {}) {
+  // Animés fermés (V1c) : ni comptés ni choisis comme couverture. Fragments
+  // CONSTANTS (jamais une valeur du client) : la requête reste la même, paramètres
+  // inclus.
+  const sansAnime = animes ? '' : 'AND a.animated = 0';
+  const sansAnimeCover = animes ? '' : 'AND ca.animated = 0';
   const [packs] = await db.execute(
     `SELECT p.id, p.code, p.name_i18n, p.description_i18n, p.is_premium, p.version,
             (SELECT COUNT(*) FROM sticker s JOIN sticker_asset a ON a.id = s.asset_id
-              WHERE s.pack_id = p.id AND a.status = 0) AS count,
+              WHERE s.pack_id = p.id AND a.status = 0 ${sansAnime}) AS count,
             -- Couverture : le sticker désigné, à défaut le premier actif du pack.
             (SELECT COALESCE(ca.thumb_key, ca.storage_key)
                FROM sticker cs JOIN sticker_asset ca ON ca.id = cs.asset_id
-              WHERE cs.pack_id = p.id AND ca.status = 0
+              WHERE cs.pack_id = p.id AND ca.status = 0 ${sansAnimeCover}
               ORDER BY (cs.id = p.cover_sticker_id) DESC, cs.position ASC
               LIMIT 1) AS cover_thumb_key
        FROM sticker_pack p
@@ -115,7 +120,9 @@ async function listeStickersDuPack(packId, db = pool) {
  * et ses stickers ne sont plus renvoyés en favoris. Le fichier et les anciens
  * messages ne sont pas concernés.
  */
-async function chargeMoi(alanyaID, db = pool) {
+async function chargeMoi(alanyaID, db = pool, { animes = false } = {}) {
+  // Animés fermés (V1c) : leurs favoris ne sont pas rendus (fragment constant).
+  const sansAnime = animes ? '' : 'AND a.animated = 0';
   const [packs] = await db.execute(
     `SELECT p.id, p.code, u.position
        FROM user_sticker_pack u JOIN sticker_pack p ON p.id = u.pack_id
@@ -129,7 +136,7 @@ async function chargeMoi(alanyaID, db = pool) {
        JOIN sticker s ON s.id = f.sticker_id
        JOIN sticker_pack p ON p.id = s.pack_id
        JOIN sticker_asset a ON a.id = s.asset_id
-      WHERE f.alanyaID = ? AND a.status = 0 AND p.status = ?
+      WHERE f.alanyaID = ? AND a.status = 0 AND p.status = ? ${sansAnime}
       ORDER BY f.added_at ASC, f.sticker_id ASC`,
     [alanyaID, STATUS_PUBLIE],
   );

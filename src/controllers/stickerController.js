@@ -10,6 +10,9 @@ const crypto = require('crypto');
 const pool = require('../config/db');
 const { fail, failInternal } = require('../utils/apiError');
 const store = require('../services/stickerStore');
+const {
+  getStickerSettings, creationOuverte, animesOuverts,
+} = require('../services/stickerSettingsService');
 const { emitStickersSync } = require('../services/stickerSync');
 const { entitlementsOrNull } = require('../services/billing/entitlements');
 const { publicUrl } = require('../services/mediaStorage');
@@ -38,6 +41,23 @@ async function sansDroitPlus(alanyaID) {
   return Boolean(droits && droits.features && droits.features[FEATURE_PREMIUM] === false);
 }
 
+/**
+ * Réglages lus une fois pour la requête (cache 30 s). Illisibles : tout fermé
+ * (`{}`) — ces routes ne révèlent rien et n'accusent pas réception.
+ */
+async function reglagesDeRequete() {
+  try {
+    return await getStickerSettings();
+  } catch (_) {
+    return {};
+  }
+}
+
+/** Les stickers animés sont-ils ouverts pour cette requête (V1c) ? Illisible : non. */
+async function animesOuvertsPourRequete() {
+  return animesOuverts(await reglagesDeRequete());
+}
+
 const idPositif = (raw) => {
   const n = Number(raw);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
@@ -58,10 +78,11 @@ const refuseServeur = (res, tag, e) => {
 
 async function getCatalog(req, res) {
   try {
+    const animes = await animesOuvertsPourRequete();
     const [lang, verrouille, { packs, version }] = await Promise.all([
       langueDeRequete(req),
       sansDroitPlus(req.user.alanyaID),
-      store.listeCatalogue(),
+      store.listeCatalogue(undefined, { animes }),
     ]);
     const corps = presentCatalog({ packs, version, lang, urlDe: publicUrl, verrouille });
     // L'ETag couvre tout ce qui varie pour CE lecteur : langue et verrous
@@ -84,13 +105,15 @@ async function getPack(req, res) {
     if (!pack || !packVisible(pack)) {
       return fail(res, 404, 'STICKER_PACK_UNAVAILABLE', 'Pack de stickers indisponible');
     }
+    const animes = await animesOuvertsPourRequete();
     const [lang, verrouille, stickers] = await Promise.all([
       langueDeRequete(req),
       sansDroitPlus(req.user.alanyaID),
       store.listeStickersDuPack(pack.id),
     ]);
     res.set('Vary', 'Authorization, Accept-Language');
-    return res.json(presentPack({ pack, stickers, lang, urlDe: publicUrl, verrouille }));
+    // Animés fermés : omis ici, dans le présentateur (V1c, contrat §4c).
+    return res.json(presentPack({ pack, stickers, lang, urlDe: publicUrl, verrouille, animes }));
   } catch (e) {
     return refuseServeur(res, 'pack', e);
   }
@@ -98,7 +121,15 @@ async function getPack(req, res) {
 
 async function getMe(req, res) {
   try {
-    return res.json(presentMe(await store.chargeMoi(req.user.alanyaID)));
+    const reglages = await reglagesDeRequete();
+    const animes = animesOuverts(reglages);
+    const moi = await store.chargeMoi(req.user.alanyaID, undefined, { animes });
+    // `features` (V1c, additif) : ce que le serveur ouvre pour ce compte. L'app s'y
+    // fie pour montrer la création et l'animé ; absent = faux.
+    return res.json(presentMe({
+      ...moi,
+      features: { creation: creationOuverte(reglages), animated: animes },
+    }));
   } catch (e) {
     return refuseServeur(res, 'me', e);
   }
@@ -184,6 +215,7 @@ async function deleteFavorite(req, res) {
 
 module.exports = {
   langueDeRequete,
+  animesOuvertsPourRequete,
   getCatalog,
   getPack,
   getMe,

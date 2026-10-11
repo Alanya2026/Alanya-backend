@@ -20,10 +20,14 @@
  * Ce qui décide, c'est le format que `sharp` lit dans les octets : un GIF
  * renommé en `.png` est refusé ici, quel que soit son en-tête.
  *
- * ── V1a ──
+ * ── V1a / V1c ──
  *
- * Un fichier animé (plusieurs pages) et le SVG sont refusés : l'animé arrive en
- * V1c, et un SVG est un document, pas une image.
+ * `reencoder` (le STATIQUE) refuse toujours un fichier animé (plusieurs pages)
+ * et le SVG : un SVG est un document, pas une image. L'animé (V1c) a son propre
+ * module, `utils/stickerAnime` : la création utilisateur y passe directement, et
+ * le dépôt ADMIN d'un WebP animé y est aiguillé par `preparerAsset` quand l'appelant
+ * l'autorise (`animeAutorise`) ET que l'en-tête du fichier annonce une animation.
+ * Un fichier statique suit exactement le chemin d'avant.
  */
 
 const crypto = require('crypto');
@@ -148,9 +152,15 @@ async function reencoder(buffer) {
  * La liste de blocage porte sur l'empreinte du fichier RÉ-ENCODÉ : la même
  * image renvoyée par un autre compte donne le même WebP, donc le même refus.
  * Les quotas ne s'appliquent pas à l'officiel (`ownerId = 0`).
+ * `animeAutorise` : accepte un WebP animé (dépôt admin, V1c) ; par défaut, refusé.
  */
-async function preparerAsset(buffer, { ownerId = 0 } = {}, deps = {}) {
-  const pret = await reencoder(buffer);
+async function preparerAsset(buffer, { ownerId = 0, animeAutorise = false } = {}, deps = {}) {
+  // Aiguillage V1c : seul un WebP dont l'en-tête annonce une animation quitte le
+  // chemin statique, et seulement pour un appelant qui l'a demandé (l'admin).
+  const anime = animeAutorise && require('./stickerAnime').estWebpAnime(buffer);
+  const pret = anime
+    ? await require('./stickerAnime').reencoderAnimeWebp(buffer)
+    : await reencoder(buffer);
 
   if (deps.estBloque && await deps.estBloque(pret.sha256)) {
     throw new StickerAssetError('STICKER_ASSET_BLOCKED', 'Image bloquée', 422);

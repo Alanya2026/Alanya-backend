@@ -41,6 +41,14 @@ function presentCatalog({ packs, version, lang, urlDe, verrouille }) {
   };
 }
 
+/**
+ * Animés fermés (V1c, `animated_enabled = 0`) : les stickers animés sont OMIS des
+ * lectures (pack, mes packs, lien de partage), ni listés ni comptés. Fermé par
+ * défaut : un appelant qui oublie `animes` ne laisse rien filtrer vers un client
+ * pour qui la fonctionnalité n'existe pas.
+ */
+const sansAnimes = (stickers, animes) => (animes ? stickers : stickers.filter((s) => !bool(s.animated)));
+
 /** Un sticker au format du contrat (`pack.json`) : mêmes clés partout. */
 function presentSticker(s, { lang, urlDe }) {
   return {
@@ -57,7 +65,7 @@ function presentSticker(s, { lang, urlDe }) {
   };
 }
 
-function presentPack({ pack, stickers, lang, urlDe, verrouille }) {
+function presentPack({ pack, stickers, lang, urlDe, verrouille, animes = false }) {
   return {
     id: Number(pack.id),
     code: pack.code,
@@ -66,7 +74,7 @@ function presentPack({ pack, stickers, lang, urlDe, verrouille }) {
     version: Number(pack.version) || 1,
     isPremium: bool(pack.is_premium),
     locked: bool(pack.is_premium) && Boolean(verrouille),
-    stickers: stickers.map((s) => presentSticker(s, { lang, urlDe })),
+    stickers: sansAnimes(stickers, animes).map((s) => presentSticker(s, { lang, urlDe })),
   };
 }
 
@@ -83,10 +91,11 @@ function vignetteDe(coverId, stickers, urlDe) {
  * @param {Array} p.packs     lignes `sticker_pack`
  * @param {Array} p.stickers  lignes `sticker` + actif, `pack_id` en tête
  */
-function presentMesPacks({ packs, stickers, lang, urlDe }) {
+function presentMesPacks({ packs, stickers, lang, urlDe, animes = false }) {
+  const visibles = sansAnimes(stickers, animes);
   return {
     packs: packs.map((p) => {
-      const siens = stickers.filter((s) => Number(s.pack_id) === Number(p.id));
+      const siens = visibles.filter((s) => Number(s.pack_id) === Number(p.id));
       return {
         id: Number(p.id),
         code: p.code,
@@ -107,7 +116,8 @@ function presentMesPacks({ packs, stickers, lang, urlDe }) {
  * Fiche d'un lien de partage : lecture seule. Aucun identifiant de compte ne
  * sort (`mine` suffit) ; `addedPackId` = ma copie, si je l'ai déjà installée.
  */
-function presentPartage({ pack, stickers, mine, addedPackId, lang, urlDe }) {
+function presentPartage({ pack, stickers: tous, mine, addedPackId, lang, urlDe, animes = false }) {
+  const stickers = sansAnimes(tous, animes);
   return {
     name: resoudre(pack.name_i18n, lang),
     description: resoudre(pack.description_i18n, lang),
@@ -121,13 +131,21 @@ function presentPartage({ pack, stickers, mine, addedPackId, lang, urlDe }) {
   };
 }
 
-/** Ids seulement (contrat §4) : le client résout le reste par le catalogue. */
-function presentMe({ packs, favorites, version }) {
-  return {
+/**
+ * Ids seulement (contrat §4) : le client résout le reste par le catalogue.
+ * `features` (V1c, additif) : `{creation, animated}`, posé seulement quand le
+ * contrôleur le fournit — un client ancien l'ignore, absent = faux pour l'app.
+ */
+function presentMe({ packs, favorites, version, features }) {
+  const corps = {
     version: Number(version) || 0,
     packs: packs.map((p) => ({ id: Number(p.id), code: p.code, position: Number(p.position) })),
     favorites: favorites.map((f) => Number(f)),
   };
+  if (features) {
+    corps.features = { creation: Boolean(features.creation), animated: Boolean(features.animated) };
+  }
+  return corps;
 }
 
 module.exports = {

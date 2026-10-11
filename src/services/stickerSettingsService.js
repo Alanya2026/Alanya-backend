@@ -80,6 +80,23 @@ function creationOuverte(settings) {
 }
 
 /**
+ * Les stickers ANIMÉS (V1c) sont-ils ouverts ? `animated_enabled` s'ajoute à
+ * `enabled` (jamais seul) : fermé, les animés sont omis des lectures, leur envoi
+ * répond `STICKER_NOT_FOUND`, leur création `NOT_FOUND`. Fonction pure.
+ */
+function animesOuverts(settings) {
+  return stickersOuverts(settings) && Number(settings?.animated_enabled) === 1;
+}
+
+/**
+ * La CRÉATION animée est-elle ouverte ? Les trois interrupteurs, jamais moins :
+ * `enabled`, `creation_enabled` ET `animated_enabled`. Fonction pure.
+ */
+function creationAnimeeOuverte(settings) {
+  return creationOuverte(settings) && animesOuverts(settings);
+}
+
+/**
  * Réglage global, en cache 30 s par instance.
  *
  * @throws {StickerSettingsInaccessibles} lecture en échec — rien n'est mis en
@@ -118,11 +135,25 @@ async function peutCreerStickers() {
   return creationOuverte(await getStickerSettings());
 }
 
+/** Les stickers animés sont-ils ouverts (V1c) ? */
+async function peutLireAnimes() {
+  return animesOuverts(await getStickerSettings());
+}
+
+/** La création de stickers animés est-elle ouverte (V1c) ? */
+async function peutCreerAnimes() {
+  return creationAnimeeOuverte(await getStickerSettings());
+}
+
 module.exports = {
   DEFAULTS,
   StickerSettingsInaccessibles,
   stickersOuverts,
   creationOuverte,
+  animesOuverts,
+  creationAnimeeOuverte,
+  peutLireAnimes,
+  peutCreerAnimes,
   getStickerSettings,
   invalidateStickerSettings,
   peutUtiliserStickers,

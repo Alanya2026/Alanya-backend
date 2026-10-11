@@ -124,11 +124,12 @@ function canonicalContent({ packCode, sid, emoji, width, height, animated }) {
 /** Dépendances par défaut : la base et le stockage réels. Chargées à l'usage. */
 function depsParDefaut() {
   const store = require('../services/stickerStore');
-  const { peutUtiliserStickers } = require('../services/stickerSettingsService');
+  const { peutUtiliserStickers, peutLireAnimes } = require('../services/stickerSettingsService');
   const { entitlementsOrNull } = require('../services/billing/entitlements');
   const { publicUrl } = require('../services/mediaStorage');
   return {
     ouvert: peutUtiliserStickers,
+    animesOuverts: peutLireAnimes,
     chargeSticker: store.chargeStickerPourEnvoi,
     droits: entitlementsOrNull,
     urlDe: publicUrl,
@@ -141,8 +142,8 @@ function depsParDefaut() {
  * @param {object} p
  * @param {*}      p.content   `content` envoyé par le client
  * @param {number} p.senderID
- * @param {object} [deps]      `ouvert()`, `chargeSticker(sid, senderID)`,
- *                             `droits(senderID)`, `urlDe(clé)` — injectables
+ * @param {object} [deps]      `ouvert()`, `animesOuverts()` (V1c), `chargeSticker(sid,
+ *                             senderID)`, `droits(senderID)`, `urlDe(clé)` — injectables
  * @returns {Promise<{content: string, mediaUrl: string, mediaName: string,
  *                    sid: number, packCode: string}>}
  * @throws {StickerMessageError}
@@ -167,6 +168,19 @@ async function prepareStickerMessage({ content, senderID }, deps = depsParDefaut
   // n'existe plus pour un nouvel envoi. Les anciens messages, eux, affichent
   // le marqueur « Sticker retiré » côté application.
   if (Number(s.asset_status) !== 0) throw refus('STICKER_NOT_FOUND');
+  // Sticker ANIMÉ (V1c) : `animated_enabled` fermé → il n'existe pas pour l'envoi,
+  // même `STICKER_NOT_FOUND` qu'un fichier retiré (aucun code propre à l'animé).
+  // L'indicateur `a` du message vient TOUJOURS de `sticker_asset.animated` relu en
+  // base ci-dessous, jamais du client. Dépendance absente = fermé.
+  if (Number(s.animated) === 1) {
+    let animesOuverts = false;
+    try {
+      animesOuverts = deps.animesOuverts ? Boolean(await deps.animesOuverts()) : false;
+    } catch (e) {
+      throw refus('SERVICE_UNAVAILABLE');
+    }
+    if (!animesOuverts) throw refus('STICKER_NOT_FOUND');
+  }
 
   const visibilite = Number(s.visibility);
   const statut = Number(s.pack_status);

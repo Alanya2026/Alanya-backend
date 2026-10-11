@@ -13,12 +13,13 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const requireStickers = require('../middleware/requireStickers');
 const requireStickerCreation = require('../middleware/requireStickerCreation');
-const { uploadSticker, handleMulterError } = require('../middleware/upload');
+const requireStickerAnimated = require('../middleware/requireStickerAnimated');
+const { uploadSticker, uploadStickerAnime, handleMulterError } = require('../middleware/upload');
 const c = require('../controllers/stickerController');
 const perso = require('../controllers/stickerPersonalController');
 const packs = require('../controllers/stickerPackController');
 const {
-  stickerShareReadLimiter, stickerShareAddLimiter, stickerShareManageLimiter,
+  stickerShareReadLimiter, stickerShareAddLimiter, stickerShareManageLimiter, stickerAnimeLimiter,
 } = require('../middleware/rateLimiter');
 
 router.use(auth, requireStickers);
@@ -79,6 +80,28 @@ router.post(
   uploadSticker.single('file'),
   handleMulterError,
   perso.postAsset,
+);
+
+/**
+ * @swagger
+ * /api/stickers/assets/animated:
+ *   post:
+ *     summary: Crée un sticker animé depuis un GIF ou un WebP animé (V1c) → {assetId, stickerId, animated, bytes, frames, durationMs}
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+// V1c : trois interrupteurs (`enabled`, `creation_enabled`, `animated_enabled`),
+// puis 10 créations par heure et par compte, puis multer dédié (≤ 3 Mo). Les 404
+// « fermé » précèdent le limiteur : ils ne consomment aucun quota et ne lisent
+// pas le fichier. La route littérale est posée AVANT `/assets/:id`.
+router.post(
+  '/assets/animated',
+  requireStickerCreation,
+  requireStickerAnimated,
+  stickerAnimeLimiter,
+  uploadStickerAnime.single('file'),
+  handleMulterError,
+  perso.postAssetAnime,
 );
 
 /**

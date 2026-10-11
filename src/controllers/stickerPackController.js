@@ -18,7 +18,7 @@ const persist = require('../services/stickerPackService');
 const { MAX_STICKERS_PACK } = require('../services/stickerPersonalService');
 const { emitStickersSync } = require('../services/stickerSync');
 const { publicUrl } = require('../services/mediaStorage');
-const { langueDeRequete } = require('./stickerController');
+const { langueDeRequete, animesOuvertsPourRequete } = require('./stickerController');
 const { presentMesPacks, presentPartage } = require('../utils/stickerPresenter');
 const { fail, failInternal } = require('../utils/apiError');
 
@@ -44,12 +44,14 @@ const objetSimple = (v) => v !== null && typeof v === 'object' && !Array.isArray
 /** GET /api/stickers/me/created — mes packs perso, stickers compris. */
 async function getMesPacks(req, res) {
   try {
-    const [lang, { packs, stickers }] = await Promise.all([
+    const [lang, animes, { packs, stickers }] = await Promise.all([
       langueDeRequete(req),
+      animesOuvertsPourRequete(),
       persist.listerMesPacks(req.user.alanyaID),
     ]);
     res.set('Cache-Control', 'private, no-store');
-    return res.json(presentMesPacks({ packs, stickers, lang, urlDe: publicUrl }));
+    // Animés fermés (V1c) : omis de la liste (jamais supprimés : la ligne reste).
+    return res.json(presentMesPacks({ packs, stickers, lang, urlDe: publicUrl, animes }));
   } catch (e) {
     return repondreErreur(res, e, 'getMesPacks');
   }
@@ -177,12 +179,13 @@ async function deleteShare(req, res) {
 /** GET /api/stickers/share/:token — fiche en lecture seule d'un pack partagé. */
 async function getShare(req, res) {
   try {
-    const [lang, r] = await Promise.all([
+    const [lang, animes, r] = await Promise.all([
       langueDeRequete(req),
+      animesOuvertsPourRequete(),
       persist.resoudrePartage(req.user.alanyaID, req.params.token),
     ]);
     res.set('Cache-Control', 'private, no-store');
-    return res.json(presentPartage({ ...r, lang, urlDe: publicUrl }));
+    return res.json(presentPartage({ ...r, lang, urlDe: publicUrl, animes }));
   } catch (e) {
     return repondreErreur(res, e, 'getShare');
   }
@@ -195,7 +198,8 @@ async function getShare(req, res) {
  */
 async function postShareAdd(req, res) {
   try {
-    const r = await persist.ajouterPackPartage(req.user.alanyaID, req.params.token);
+    const animes = await animesOuvertsPourRequete();
+    const r = await persist.ajouterPackPartage(req.user.alanyaID, req.params.token, undefined, { animes });
     if (r.deja) return res.status(200).json({ packId: r.packId, deja: true, mine: Boolean(r.mine) });
     syncPacks(req, req.user.alanyaID);
     return res.status(201).json({

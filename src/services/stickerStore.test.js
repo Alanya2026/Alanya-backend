@@ -80,6 +80,27 @@ test('listeCatalogue : packs officiels PUBLIÉS seulement', async () => {
   assert.deepStrictEqual(params, [0, store.STATUS_PUBLIE]);
 });
 
+test('V1c : catalogue et favoris — animés exclus par défaut (fragments constants), inclus sur demande', async () => {
+  const d1 = base([[/COALESCE\(MAX/, [{ version: 9 }]]]);
+  await store.listeCatalogue(d1);
+  const [ferme, pf] = d1.requetes[0];
+  assert.match(ferme, /a\.status = 0 AND a\.animated = 0\) AS count/, 'compteur sans animés');
+  assert.match(ferme, /ca\.status = 0 AND ca\.animated = 0\s+ORDER BY/, 'couverture jamais un animé');
+  assert.deepStrictEqual(pf, [0, store.STATUS_PUBLIE], 'paramètres inchangés');
+  const d2 = base([[/COALESCE\(MAX/, [{ version: 9 }]]]);
+  await store.listeCatalogue(d2, { animes: true });
+  assert.doesNotMatch(d2.requetes[0][0], /animated/, 'animés ouverts : aucun filtre');
+
+  const d3 = base([[VERSION_RE, [{ version: 1 }]]]);
+  await store.chargeMoi(7, d3);
+  const [favFerme, pm] = d3.requetes.find(([sql]) => FAV_RE.test(sql));
+  assert.match(favFerme, /AND p\.status = \? AND a\.animated = 0/);
+  assert.deepStrictEqual(pm, [7, store.STATUS_PUBLIE]);
+  const d4 = base([[VERSION_RE, [{ version: 1 }]]]);
+  await store.chargeMoi(7, d4, { animes: true });
+  assert.doesNotMatch(d4.requetes.find(([sql]) => FAV_RE.test(sql))[0], /animated/);
+});
+
 test('chargeStickerPourEnvoi : rend le statut du pack (la décision est dans stickerMessage)', async () => {
   const d = base([[/FROM sticker s/, [{ sid: 1, pack_status: 2 }]]]);
   const r = await store.chargeStickerPourEnvoi(1, 7, d);

@@ -4,6 +4,7 @@ const fs      = require('fs');
 const os      = require('os');
 
 const { LIMITES: LIMITES_STICKER, mimeAccepte: stickerMimeAccepte } = require('../utils/stickerAsset');
+const { LIMITES_ANIME: LIMITES_ANIME_STICKER } = require('../utils/stickerAnime');
 const {
   newMediaKey,
   newImageKey,
@@ -265,6 +266,26 @@ const handleMulterError = (err, req, res, next) => {
   next();
 };
 
+/**
+ * Sticker ANIMÉ créé par un utilisateur (V1c, contrat §4c) : GIF ou WebP animé,
+ * en MÉMOIRE, ≤ 3 Mo, UN seul fichier (champ `file`). Le type déclaré n'est qu'un
+ * premier tri : le format réel est lu dans les octets par `utils/stickerAnime`
+ * (GIF87a/GIF89a, RIFF…WEBP) avant tout appel à `sharp`. Les champs texte
+ * (`shape`, `packId`, `emoji`, `nom`) sont bornés : quelques octets chacun.
+ */
+const MIME_ANIME_ACCEPTES = Object.freeze(['image/gif', 'image/webp']);
+const stickerAnimeFilter = (req, file, cb) => {
+  if (MIME_ANIME_ACCEPTES.includes(String(file.mimetype || '').toLowerCase())) return cb(null, true);
+  cb(new Error('Seuls les formats GIF et WebP animé sont autorisés'), false);
+};
+const uploadStickerAnime = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: LIMITES_ANIME_STICKER.ENTREE_MAX_OCTETS, files: 1, fields: 8, fieldSize: 1024, parts: 12,
+  },
+  fileFilter: stickerAnimeFilter,
+});
+
 /** Un sticker par envoi, champ `file` ; plusieurs, champ `files` (admin). */
 const uploadSticker = multer({
   storage: multer.memoryStorage(),
@@ -274,6 +295,7 @@ const uploadSticker = multer({
 
 module.exports = {
   uploadSticker,
+  uploadStickerAnime,
   uploadAvatar,
   uploadMedia,
   uploadVoicemailGreeting,

@@ -46,11 +46,11 @@ remplace('../services/billing/entitlements', { entitlementsOrNull: async () => e
 const store = {
   MAX_PACKS_INSTALLES: 50,
   chargeStickerPourEnvoi: async () => null,
-  listeCatalogue: async () => { await trace('listeCatalogue')(); return etat.catalogue; },
+  listeCatalogue: async (db, opts) => { await trace('listeCatalogue')(); etat.optsCatalogue = opts; return etat.catalogue; },
   chargePackParCode: async (...a) => { await trace('chargePackParCode')(...a); return etat.packParCode; },
   chargePackParId: async (...a) => { await trace('chargePackParId')(...a); return etat.pack; },
   listeStickersDuPack: async () => etat.stickers,
-  chargeMoi: async () => { await trace('chargeMoi')(); return etat.moi; },
+  chargeMoi: async (id, db, opts) => { await trace('chargeMoi')(); etat.optsMoi = opts; return etat.moi; },
   compteInstalles: async () => etat.installes,
   installerPack: trace('installerPack'),
   retirerPack: trace('retirerPack'),
@@ -159,7 +159,43 @@ const ligne = { id: 1, code: 'alanya', name_i18n: { fr: 'Alanya' }, description_
     // ── /me ────────────────────────────────────────────────────────────────
     reinit({ moi: { packs: [{ id: 1, code: 'alanya', position: 0 }], favorites: [1, 45], version: 12 } });
     r = await appel('GET', '/me');
-    assert.deepStrictEqual(r.corps, { version: 12, packs: [{ id: 1, code: 'alanya', position: 0 }], favorites: [1, 45] });
+    assert.deepStrictEqual(
+      r.corps,
+      { version: 12, packs: [{ id: 1, code: 'alanya', position: 0 }], favorites: [1, 45], features: { creation: false, animated: false } },
+      'V1c : `features` additif ; tout fermé par défaut',
+    );
+    // Les champs historiques restent identiques à la fixture du contrat.
+    const { features: _f, ...sansFeatures } = r.corps;
+    assert.deepStrictEqual(Object.keys(sansFeatures), ['version', 'packs', 'favorites']);
+    assert.deepStrictEqual(etat.optsMoi, { animes: false }, 'favoris animés omis tant que fermé');
+    for (const [reglages, attendu] of [
+      [{ enabled: 1, creation_enabled: 1, animated_enabled: 0 }, { creation: true, animated: false }],
+      [{ enabled: 1, creation_enabled: 0, animated_enabled: 1 }, { creation: false, animated: true }],
+      [{ enabled: 1, creation_enabled: 1, animated_enabled: 1 }, { creation: true, animated: true }],
+    ]) {
+      reinit({ reglages, moi: { packs: [], favorites: [], version: 1 } });
+      r = await appel('GET', '/me');
+      assert.deepStrictEqual(r.corps.features, attendu, JSON.stringify(reglages));
+      assert.deepStrictEqual(etat.optsMoi, { animes: attendu.animated });
+    }
+
+    // ── V1c : stickers animés omis tant que `animated_enabled` est fermé ──
+    const anime = { id: 72, position: 1, emoji: '🎉', name_i18n: null, storage_key: 'official/stickers/royal/72_aa.webp', thumb_key: 'official/stickers/royal/72_aa_t.webp', width: 512, height: 512, bytes: 90000, animated: 1 };
+    const fixe = { id: 71, position: 0, emoji: '👑', name_i18n: null, storage_key: 'official/stickers/royal/71_bb.webp', thumb_key: null, width: 512, height: 512, bytes: 24500, animated: 0 };
+    for (const [reglages, ids, libelle] of [
+      [{ enabled: 1 }, [71], 'animated_enabled absent'],
+      [{ enabled: 1, animated_enabled: 0 }, [71], 'animated_enabled = 0'],
+      [{ enabled: 1, creation_enabled: 1, animated_enabled: 0 }, [71], 'création ouverte mais animés fermés'],
+      [{ enabled: 1, animated_enabled: 1 }, [71, 72], 'animated_enabled = 1'],
+    ]) {
+      reinit({ reglages, packParCode: { ...PACK_BASE, name_i18n: { fr: 'Royal' } }, stickers: [fixe, anime] });
+      r = await appel('GET', '/packs/royal');
+      assert.deepStrictEqual(r.corps.stickers.map((x) => x.id), ids, `GET /packs/:code — ${libelle}`);
+      if (ids.length === 2) assert.strictEqual(r.corps.stickers[1].animated, true);
+      reinit({ reglages });
+      await appel('GET', '/catalog');
+      assert.deepStrictEqual(etat.optsCatalogue, { animes: ids.length === 2 }, `catalogue — ${libelle}`);
+    }
 
     // ── Installer / retirer ────────────────────────────────────────────────
     reinit();
