@@ -133,7 +133,7 @@ function presentPartage({ pack, stickers: tous, mine, addedPackId, lang, urlDe, 
 
 /**
  * Ids seulement (contrat §4) : le client résout le reste par le catalogue.
- * `features` (V1c, additif) : `{creation, animated}`, posé seulement quand le
+ * `features` (V1c, additif) : `{creation, animated[, video]}`, posé seulement quand le
  * contrôleur le fournit — un client ancien l'ignore, absent = faux pour l'app.
  */
 function presentMe({ packs, favorites, version, features }) {
@@ -144,6 +144,8 @@ function presentMe({ packs, favorites, version, features }) {
   };
   if (features) {
     corps.features = { creation: Boolean(features.creation), animated: Boolean(features.animated) };
+    // `video` (V1c, contrat §4d) : posé seulement quand le contrôleur le fournit.
+    if (features.video !== undefined) corps.features.video = Boolean(features.video);
   }
   return corps;
 }

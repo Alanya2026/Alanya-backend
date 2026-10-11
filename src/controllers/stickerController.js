@@ -9,6 +9,7 @@
 const crypto = require('crypto');
 const pool = require('../config/db');
 const { fail, failInternal } = require('../utils/apiError');
+const stickerVideo = require('../utils/stickerVideo');
 const store = require('../services/stickerStore');
 const {
   getStickerSettings, creationOuverte, animesOuverts,
@@ -126,9 +127,12 @@ async function getMe(req, res) {
     const moi = await store.chargeMoi(req.user.alanyaID, undefined, { animes });
     // `features` (V1c, additif) : ce que le serveur ouvre pour ce compte. L'app s'y
     // fie pour montrer la création et l'animé ; absent = faux.
+    // `video` : ffmpeg est-il là ? (contrat §4d). Sans animés ouverts, inutile de
+    // sonder : l'option n'existe pas.
+    const video = animes ? await stickerVideo.disponible() : false;
     return res.json(presentMe({
       ...moi,
-      features: { creation: creationOuverte(reglages), animated: animes },
+      features: { creation: creationOuverte(reglages), animated: animes, video },
     }));
   } catch (e) {
     return refuseServeur(res, 'me', e);

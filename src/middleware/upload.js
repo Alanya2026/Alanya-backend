@@ -4,7 +4,7 @@ const fs      = require('fs');
 const os      = require('os');
 
 const { LIMITES: LIMITES_STICKER, mimeAccepte: stickerMimeAccepte } = require('../utils/stickerAsset');
-const { LIMITES_ANIME: LIMITES_ANIME_STICKER } = require('../utils/stickerAnime');
+const { LIMITES_VIDEO: LIMITES_VIDEO_STICKER } = require('../utils/stickerVideo');
 const {
   newMediaKey,
   newImageKey,
@@ -273,15 +273,24 @@ const handleMulterError = (err, req, res, next) => {
  * (GIF87a/GIF89a, RIFF…WEBP) avant tout appel à `sharp`. Les champs texte
  * (`shape`, `packId`, `emoji`, `nom`) sont bornés : quelques octets chacun.
  */
-const MIME_ANIME_ACCEPTES = Object.freeze(['image/gif', 'image/webp']);
+const MIME_ANIME_ACCEPTES = Object.freeze([
+  'image/gif', 'image/webp',
+  // Vidéo (V1c, contrat §4d). Le type déclaré n'est qu'un premier tri : un client
+  // peut le mentir, d'où la lecture des octets magiques (ftyp, EBML) par le service.
+  'video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'video/3gpp',
+]);
 const stickerAnimeFilter = (req, file, cb) => {
   if (MIME_ANIME_ACCEPTES.includes(String(file.mimetype || '').toLowerCase())) return cb(null, true);
-  cb(new Error('Seuls les formats GIF et WebP animé sont autorisés'), false);
+  cb(new Error('Seuls les formats GIF, WebP animé et vidéo (MP4, MOV, WebM) sont autorisés'), false);
 };
 const uploadStickerAnime = multer({
   storage: multer.memoryStorage(),
+  // 20 Mo pour une vidéo. Un GIF / WebP animé reste limité à 3 Mo : le contrôle est
+  // refait sur le format RÉEL par `stickerAnime.convertirAnime` (422 « trop lourd »).
   limits: {
-    fileSize: LIMITES_ANIME_STICKER.ENTREE_MAX_OCTETS, files: 1, fields: 8, fieldSize: 1024, parts: 12,
+    // +1 : multer refuse un fichier qui ATTEINT la limite, pas seulement qui la dépasse ;
+    // sans cet octet, une vidéo de exactement 20 Mo serait rejetée alors qu'elle est permise.
+    fileSize: LIMITES_VIDEO_STICKER.ENTREE_MAX_OCTETS + 1, files: 1, fields: 8, fieldSize: 1024, parts: 12,
   },
   fileFilter: stickerAnimeFilter,
 });

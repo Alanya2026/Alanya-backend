@@ -157,11 +157,15 @@ const ligne = { id: 1, code: 'alanya', name_i18n: { fr: 'Alanya' }, description_
     assert.strictEqual(r.corps.stickers[0].animated, false);
 
     // ── /me ────────────────────────────────────────────────────────────────
+    // ffmpeg n'est pas une donnée du test : on fixe `features.video` à la main.
+    const stickerVideo = require(resolu('../utils/stickerVideo'));
+    let videoDispo = false;
+    stickerVideo.disponible = async () => videoDispo;
     reinit({ moi: { packs: [{ id: 1, code: 'alanya', position: 0 }], favorites: [1, 45], version: 12 } });
     r = await appel('GET', '/me');
     assert.deepStrictEqual(
       r.corps,
-      { version: 12, packs: [{ id: 1, code: 'alanya', position: 0 }], favorites: [1, 45], features: { creation: false, animated: false } },
+      { version: 12, packs: [{ id: 1, code: 'alanya', position: 0 }], favorites: [1, 45], features: { creation: false, animated: false, video: false } },
       'V1c : `features` additif ; tout fermé par défaut',
     );
     // Les champs historiques restent identiques à la fixture du contrat.
@@ -169,15 +173,26 @@ const ligne = { id: 1, code: 'alanya', name_i18n: { fr: 'Alanya' }, description_
     assert.deepStrictEqual(Object.keys(sansFeatures), ['version', 'packs', 'favorites']);
     assert.deepStrictEqual(etat.optsMoi, { animes: false }, 'favoris animés omis tant que fermé');
     for (const [reglages, attendu] of [
-      [{ enabled: 1, creation_enabled: 1, animated_enabled: 0 }, { creation: true, animated: false }],
-      [{ enabled: 1, creation_enabled: 0, animated_enabled: 1 }, { creation: false, animated: true }],
-      [{ enabled: 1, creation_enabled: 1, animated_enabled: 1 }, { creation: true, animated: true }],
+      [{ enabled: 1, creation_enabled: 1, animated_enabled: 0 }, { creation: true, animated: false, video: false }],
+      [{ enabled: 1, creation_enabled: 0, animated_enabled: 1 }, { creation: false, animated: true, video: false }],
+      [{ enabled: 1, creation_enabled: 1, animated_enabled: 1 }, { creation: true, animated: true, video: false }],
     ]) {
       reinit({ reglages, moi: { packs: [], favorites: [], version: 1 } });
       r = await appel('GET', '/me');
       assert.deepStrictEqual(r.corps.features, attendu, JSON.stringify(reglages));
       assert.deepStrictEqual(etat.optsMoi, { animes: attendu.animated });
     }
+    // V1c §4d : `features.video` = ffmpeg présent ET animés ouverts (sinon pas de sonde).
+    videoDispo = true;
+    for (const [reglages, video] of [
+      [{ enabled: 1, creation_enabled: 1, animated_enabled: 1 }, true],
+      [{ enabled: 1, creation_enabled: 1, animated_enabled: 0 }, false],
+    ]) {
+      reinit({ reglages, moi: { packs: [], favorites: [], version: 1 } });
+      r = await appel('GET', '/me');
+      assert.strictEqual(r.corps.features.video, video, `video : ${JSON.stringify(reglages)}`);
+    }
+    videoDispo = false;
 
     // ── V1c : stickers animés omis tant que `animated_enabled` est fermé ──
     const anime = { id: 72, position: 1, emoji: '🎉', name_i18n: null, storage_key: 'official/stickers/royal/72_aa.webp', thumb_key: 'official/stickers/royal/72_aa_t.webp', width: 512, height: 512, bytes: 90000, animated: 1 };

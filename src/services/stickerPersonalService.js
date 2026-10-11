@@ -229,13 +229,20 @@ async function creerStickerPerso({ buffer, alanyaID, packId = null, emoji = null
  */
 async function creerStickerPersoAnime({
   buffer, alanyaID, packId = null, emoji = null, nom = null, forme = undefined,
+  start = undefined, duration = undefined,
 }, db = pool, deps = {}) {
   const pack = await packCible(alanyaID, packId, db);
   await verifierPlafondPack(pack.id, db);
 
   const { preparerAssetAnime } = require('../utils/stickerAnime');
-  const pret = await (deps.preparerAssetAnime || preparerAssetAnime)(
-    buffer, { ownerId: alanyaID, forme }, depsSql(db),
+  const { typeVideoParOctets, preparerAssetVideo } = require('../utils/stickerVideo');
+  // Une vidéo (MP4, MOV, WebM) passe par ffmpeg puis par la même chaîne que le GIF.
+  const estVideo = typeVideoParOctets(buffer) !== null;
+  const preparer = estVideo
+    ? (deps.preparerAssetVideo || preparerAssetVideo)
+    : (deps.preparerAssetAnime || preparerAssetAnime);
+  const pret = await preparer(
+    buffer, { ownerId: alanyaID, forme, start, duration }, depsSql(db),
   );
   const r = await inscrireStickerPerso({
     pret, alanyaID, pack, emoji, nom,

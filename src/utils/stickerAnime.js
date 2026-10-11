@@ -255,10 +255,16 @@ async function convertirAnime(buffer, {
   forme = FORME_DEFAUT,
   budgetOctets = LIMITES_ANIME.SORTIE_MAX_OCTETS,
   conversionMaxMs = LIMITES_ANIME.CONVERSION_MAX_MS,
+  // 3 Mo pour un fichier venu d'un utilisateur. Seule la conversion d'une VIDÉO
+  // (`stickerVideo`) relève ce plafond : son WebP intermédiaire sort de ffmpeg,
+  // pas du client, et fait quelques Mo à haute qualité.
+  entreeMaxOctets = LIMITES_ANIME.ENTREE_MAX_OCTETS,
 } = {}, deps = {}) {
   if (!FORMES.includes(forme)) throw invalide('forme inconnue');
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw invalide('fichier vide');
-  if (buffer.length > LIMITES_ANIME.ENTREE_MAX_OCTETS) throw invalide('fichier trop lourd (3 Mo maximum)');
+  if (buffer.length > entreeMaxOctets) {
+    throw invalide(`fichier trop lourd (${Math.round(entreeMaxOctets / (1024 * KO))} Mo maximum)`);
+  }
 
   const type = typeParOctets(buffer);
   if (!type) throw invalide('format refusé (GIF ou WebP animé)');
@@ -400,6 +406,7 @@ module.exports = {
   FORMES,
   FORME_DEFAUT,
   semaphoreAnime,
+  invalide,
   typeParOctets,
   estWebpAnime,
   tronquer,

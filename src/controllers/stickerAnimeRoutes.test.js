@@ -120,7 +120,8 @@ app.use('/api/stickers', router);
     assert.strictEqual(a.emoji, '🎉');
     assert.strictEqual(a.nom, 'Fête');
     assert.ok(Buffer.compare(a.buffer, GIF) === 0, 'les octets reçus sont transmis tels quels');
-    assert.deepStrictEqual(Object.keys(a).sort(), ['alanyaID', 'buffer', 'emoji', 'forme', 'nom', 'packId'], 'aucune clé, URL ni chemin ne passe');
+    assert.deepStrictEqual(Object.keys(a).sort(), ['alanyaID', 'buffer', 'duration', 'emoji', 'forme', 'nom', 'packId', 'start'], 'aucune clé, URL ni chemin ne passe');
+    assert.deepStrictEqual([a.start, a.duration], [0, 3000], 'fenêtre par défaut (seule une vidéo s\'en sert)');
     assert.deepStrictEqual(emis[0].slice(1), ['stickers:sync', { reason: 'packs', version: emis[0][2].version }], 'stickers:sync packs');
 
     // Forme par défaut, absente ou vide.
@@ -146,13 +147,46 @@ app.use('/api/stickers', router);
     assert.deepStrictEqual([r.status, r.corps.code], [400, 'INVALID_EXTENSION'], 'type déclaré PNG refusé');
     r = await envoyer({ utilisateur: u, type: 'image/svg+xml' });
     assert.strictEqual(r.status, 400, 'SVG refusé');
-    r = await envoyer({ utilisateur: u, fichier: Buffer.alloc(3 * 1024 * 1024 + 1, 1) });
-    assert.deepStrictEqual([r.status, r.corps.code], [413, 'FILE_TOO_LARGE'], '> 3 Mo');
+    // multer laisse passer jusqu'à 20 Mo (vidéo) ; un GIF / WebP de plus de 3 Mo est refusé
+    // sur son format RÉEL par `convertirAnime` (voir stickerVideo.test.js), pas ici.
+    r = await envoyer({ utilisateur: u, fichier: Buffer.alloc(20 * 1024 * 1024 + 1, 1) });
+    assert.deepStrictEqual([r.status, r.corps.code], [413, 'FILE_TOO_LARGE'], '> 20 Mo');
+    r = await envoyer({ utilisateur: u, type: 'video/avi' });
+    assert.deepStrictEqual([r.status, r.corps.code], [400, 'INVALID_EXTENSION'], 'AVI refusé par le premier tri');
+    r = await envoyer({ utilisateur: u, type: 'application/x-msdownload' });
+    assert.strictEqual(r.status, 400, 'exécutable refusé');
     assert.strictEqual(etat.appels.length, 0, 'aucun de ces refus n\'a atteint le service');
     // Le type déclaré n'est qu'un filtre : un GIF « déclaré WebP » arrive au pipeline,
     // qui lit les octets (c'est lui qui décide, voir stickerAnime.test.js).
     r = await envoyer({ utilisateur: u, type: 'image/webp' });
     assert.strictEqual(r.status, 201);
+
+    // ── Vidéo (V1c §4d) : types acceptés, fenêtre validée, transmise telle quelle ──
+    const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(2000, 7)]);
+    for (const type of ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'video/3gpp']) {
+      u = neuf();
+      reinit();
+      r = await envoyer({ utilisateur: u, fichier: MP4, type, champs: { start: '1500', duration: '2000', shape: 'cercle' } });
+      assert.strictEqual(r.status, 201, type);
+      assert.deepStrictEqual([etat.appels[0].start, etat.appels[0].duration, etat.appels[0].forme], [1500, 2000, 'cercle'], type);
+      assert.ok(Buffer.compare(etat.appels[0].buffer, MP4) === 0, 'octets transmis tels quels');
+    }
+    // Une vidéo de 20 Mo pile passe la barrière de multer.
+    u = neuf();
+    reinit();
+    r = await envoyer({ utilisateur: u, fichier: Buffer.concat([MP4, Buffer.alloc(20 * 1024 * 1024 - MP4.length, 7)]), type: 'video/mp4' });
+    assert.strictEqual(r.status, 201, '20 Mo pile');
+    // Fenêtre absurde : 400 avant le service, rien d'appelé, rien de consommé.
+    for (const champs of [{ start: '-1' }, { start: 'abc' }, { duration: '100' }, { duration: '3001' }, { start: '1;ls' }, { duration: '1e3' }]) {
+      reinit();
+      r = await envoyer({ utilisateur: neuf(), fichier: MP4, type: 'video/mp4', champs });
+      assert.deepStrictEqual([r.status, r.corps.code], [400, 'STICKER_INVALID_PAYLOAD'], JSON.stringify(champs));
+      assert.strictEqual(etat.appels.length, 0, `${JSON.stringify(champs)} : le service n'est pas appelé`);
+    }
+    // Les mêmes gardes que le GIF : animés fermés → 404 avant multer.
+    reinit({ reglages: { enabled: 1, creation_enabled: 1, animated_enabled: 0 } });
+    r = await envoyer({ utilisateur: neuf(), fichier: MP4, type: 'video/mp4' });
+    assert.deepStrictEqual([r.status, r.corps.code], [404, 'NOT_FOUND'], 'animés fermés');
 
     // ── Erreurs du pipeline et du service : code + statut du contrat ───────
     for (const [erreur, statut, code] of [

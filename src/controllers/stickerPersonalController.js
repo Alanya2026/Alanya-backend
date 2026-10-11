@@ -17,6 +17,7 @@
 
 const persist = require('../services/stickerPersonalService');
 const { FORMES, FORME_DEFAUT } = require('../utils/stickerAnime');
+const { lireFenetre } = require('../utils/stickerVideo');
 const { emitStickersSync } = require('../services/stickerSync');
 const { fail, failInternal } = require('../utils/apiError');
 
@@ -78,7 +79,8 @@ async function postAsset(req, res) {
 /**
  * POST /api/stickers/assets/animated — crée un sticker ANIMÉ (V1c, contrat §4c).
  *
- * Champ `file` : GIF ou WebP animé, ≤ 3 Mo. Options : `shape` (`cercle` |
+ * Champ `file` : GIF ou WebP animé (≤ 3 Mo), ou VIDÉO MP4/MOV/WebM (≤ 20 Mo, §4d).
+ * Options : `start` / `duration` (ms, vidéo seulement), `shape` (`cercle` |
  * `carre-arrondi` | `carre`, défaut `carre-arrondi`), `packId`, `emoji`, `nom`.
  * Gardes posées par la route AVANT multer : `enabled`, `creation_enabled`,
  * `animated_enabled` (404 générique), puis 10 créations par heure et par compte.
@@ -92,8 +94,11 @@ async function postAssetAnime(req, res) {
       return fail(res, 400, 'STICKER_INVALID_PAYLOAD', 'shape : cercle, carre-arrondi ou carre');
     }
     if (!Buffer.isBuffer(req.file?.buffer) || req.file.buffer.length === 0) {
-      return fail(res, 422, 'STICKER_ASSET_INVALID', 'Fichier GIF ou WebP animé requis');
+      return fail(res, 422, 'STICKER_ASSET_INVALID', 'Fichier GIF, WebP animé ou vidéo requis');
     }
+    // `start` / `duration` (ms) : la fenêtre d'une VIDÉO (contrat §4d). Validés
+    // même pour un GIF (400 si absurdes), mais seule une vidéo s'en sert.
+    const { startMs, dureeMs } = lireFenetre({ start: req.body?.start, duration: req.body?.duration });
     const r = await persist.creerStickerPersoAnime({
       buffer: req.file.buffer,
       alanyaID: req.user.alanyaID,
@@ -101,6 +106,8 @@ async function postAssetAnime(req, res) {
       emoji: req.body?.emoji ?? null,
       nom: req.body?.nom ?? null,
       forme,
+      start: startMs,
+      duration: dureeMs,
     });
     syncPacks(req, req.user.alanyaID);
     return res.status(201).json({
