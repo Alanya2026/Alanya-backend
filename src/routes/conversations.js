@@ -26,6 +26,8 @@ const {
   updateConversationMute,
   ackGroupJoin,
 } = require('../controllers/conversationController');
+const { effacerDiscussion } = require('../controllers/conversationClearController');
+const { signalerCapture } = require('../controllers/conversationScreenshotController');
 const { getConversationVideoCodecs } = require('../controllers/videoCodecsController');
 
 /**
@@ -216,6 +218,59 @@ router.delete('/:id', auth, deleteConversation);
 // zéro, sans vérifier l'appartenance. C'est le chemin appelé par l'action
 // « Lu » de la notification, app fermée, donc sans écran pour s'en apercevoir.
 router.post('/:id/read', auth, requireParticipant, markAsRead);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/clear:
+ *   post:
+ *     summary: Effacer la discussion (pour moi seulement)
+ *     description: >
+ *       Vide la discussion pour l'appelant sans la quitter ni la supprimer : seuls
+ *       les messages postérieurs restent visibles. Les autres membres ne voient
+ *       rien. Diffuse `conversation:cleared` aux autres appareils du compte.
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: "{ conversationID, historyCutoffAt }"
+ *       404:
+ *         description: Conversation introuvable ou non participant
+ */
+router.post('/:id/clear', auth, requireParticipant, effacerDiscussion);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/screenshot:
+ *   post:
+ *     summary: Signaler une capture d'écran de la discussion
+ *     description: >
+ *       Le client a détecté une capture d'écran : le serveur écrit une ligne
+ *       système `screenshot` visible des deux participants. Discussion à deux
+ *       uniquement, une ligne par minute et par auteur au plus ; sinon
+ *       `posted: false` avec une raison (`not_direct`, `not_allowed`, `throttled`).
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: "{ posted: boolean, msgID?, reason? }"
+ *       404:
+ *         description: Conversation introuvable ou non participant
+ */
+router.post('/:id/screenshot', auth, requireParticipant, signalerCapture);
 router.patch('/:id/mute', auth, updateConversationMute);
 
 /**

@@ -14,6 +14,7 @@ const {
   isSelfChatRow,
   dedupeDirectConversations,
 } = require('../utils/directConversation');
+const { masquerDernierMessageEfface } = require('../utils/messageHistoryFilter');
 const { evaluateJoinAckMessage } = require('../utils/groupJoinAck');
 const { canAddUser } = require('../services/privacyPrefsService');
 const { releasePublicFiles, groupPhotosOf } = require('../utils/mediaFile');
@@ -186,7 +187,7 @@ const getConversations = async (req, res) => {
        LIMIT 500`,
       [alanyaID]
     );
-    const enriched = await attachParticipantsMany(rows, alanyaID);
+    const enriched = await attachParticipantsMany(rows.map(masquerDernierMessageEfface), alanyaID);
     res.json(dedupeDirectConversations(enriched, alanyaID));
   } catch (error) {
     throw error;
@@ -208,7 +209,7 @@ const getConversationById = async (req, res) => {
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Conversation not found', code: 'CONVERSATION_NOT_FOUND' });
     }
-    const enriched = await attachParticipants(rows[0], alanyaID);
+    const enriched = await attachParticipants(masquerDernierMessageEfface(rows[0]), alanyaID);
     res.json(enriched);
   } catch (error) {
     throw error;
@@ -763,7 +764,7 @@ async function loadEnrichedConversation(conversID, alanyaID) {
     [conversID, alanyaID],
   );
   if (rows.length === 0) return null;
-  return attachParticipants(rows[0], alanyaID);
+  return attachParticipants(masquerDernierMessageEfface(rows[0]), alanyaID);
 }
 
 // PATCH /conversations/:id/group — nom, photo, description.

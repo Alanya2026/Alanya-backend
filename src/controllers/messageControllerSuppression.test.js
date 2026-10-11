@@ -30,6 +30,8 @@ function neuf() {
     messages: new Map(),
     participants: [], // { conversID, alanyaID, role }
     conversations: new Map(), // id → { isGroup, message_count }
+    tombes: [], // pierres tombales (message_deletion) : { msgID, conversationID, deletedByID }
+    tableTombesAbsente: false, // migration 099 pas encore appliquée
   };
   connexions = { prises: 0, rendues: 0, annulations: 0, validations: 0 };
 }
@@ -45,6 +47,7 @@ function conv(id, isGroup, nombre, membres) {
 const copie = () => ({
   messages: new Map([...etat.messages].map(([k, v]) => [k, { ...v }])),
   conversations: new Map([...etat.conversations].map(([k, v]) => [k, { ...v }])),
+  tombes: etat.tombes.map((t) => ({ ...t })),
 });
 
 async function executer(sql, p) {
@@ -62,6 +65,15 @@ async function executer(sql, p) {
       .filter((r) => convs.includes(r.conversID) && gens.includes(r.alanyaID))
       .map((r) => ({ conversID: r.conversID, isGroup: etat.conversations.get(r.conversID).isGroup, alanyaID: r.alanyaID, role: r.role }));
     return [rows, []];
+  }
+  if (/^INSERT IGNORE INTO message_deletion/.test(s)) {
+    if (etat.tableTombesAbsente) throw Object.assign(new Error('no such table'), { code: 'ER_NO_SUCH_TABLE', errno: 1146 });
+    for (let i = 0; i < p.length; i += 3) {
+      if (!etat.tombes.some((t) => t.msgID === p[i])) {
+        etat.tombes.push({ msgID: p[i], conversationID: p[i + 1], deletedByID: p[i + 2] });
+      }
+    }
+    return [{ affectedRows: p.length / 3 }, []];
   }
   if (/^UPDATE message SET isDeleted = 1, deletedForID = NULL WHERE msgID IN/.test(s)) {
     let n = 0;
@@ -107,7 +119,7 @@ function fabriquerConnexion() {
     commit: async () => { connexions.validations += 1; instantane = null; },
     rollback: async () => {
       connexions.annulations += 1;
-      if (instantane) { etat.messages = instantane.messages; etat.conversations = instantane.conversations; }
+      if (instantane) { etat.messages = instantane.messages; etat.conversations = instantane.conversations; etat.tombes = instantane.tombes; }
       instantane = null;
     },
     release: () => { if (!rendue) { rendue = true; connexions.rendues += 1; } else throw new Error('connexion rendue deux fois'); },
@@ -157,6 +169,43 @@ test('expéditeur dans la fenêtre : supprimé, compteur −1, événement avec 
   assert.deepStrictEqual(evenements, [['conversation_1', 'message:deleted', {
     msgID: 100, conversationID: 1, all: true, deletedForID: null, deletedBy: 30, byAdmin: false,
   }]]);
+});
+
+test('pierre tombale écrite pour un message supprimé pour tous (rattrapage hors ligne)', async () => {
+  neuf(); groupeStandard(); ajoute({ msgID: 100, senderID: 30 }); ajoute({ msgID: 101, senderID: 30 });
+  await unitaire(30, 100);
+  await lot(20, [101]);
+  assert.deepStrictEqual(etat.tombes, [
+    { msgID: 100, conversationID: 1, deletedByID: 30 },
+    { msgID: 101, conversationID: 1, deletedByID: 20 },
+  ]);
+});
+
+test('aucune pierre tombale pour un refus, un message déjà supprimé ou « pour moi »', async () => {
+  neuf(); groupeStandard();
+  ajoute({ msgID: 1, senderID: 30, sendAt: ilYa(80 * H) }); ajoute({ msgID: 2, senderID: 30, isDeleted: 1 }); ajoute({ msgID: 3, senderID: 30 });
+  await unitaire(30, 1);
+  await unitaire(30, 2);
+  await unitaire(30, 3, 'false');
+  assert.deepStrictEqual(etat.tombes, []);
+});
+
+test('un lot refusé en cours de route n\'en laisse aucune (retour arrière)', async () => {
+  neuf(); groupeStandard();
+  ajoute({ msgID: 1, senderID: 30 }); ajoute({ msgID: 2, senderID: 30, sendAt: ilYa(80 * H) });
+  const r = await lot(30, [1, 2]);
+  assert.strictEqual(r.statut, 403);
+  assert.deepStrictEqual(etat.tombes, []);
+  assert.strictEqual(supprime(1), false);
+});
+
+test('table de pierres tombales absente (migration 099 non appliquée) : la suppression réussit quand même', async () => {
+  neuf(); groupeStandard(); ajoute({ msgID: 100, senderID: 30 });
+  etat.tableTombesAbsente = true;
+  const r = await unitaire(30, 100);
+  assert.strictEqual(r.statut, 200);
+  assert.ok(supprime(100));
+  assert.strictEqual(compteur(), 9);
 });
 
 test('expéditeur après 72 h : 403 DELETE_WINDOW_EXPIRED, rien ne change, pas d\'événement', async () => {

@@ -10,6 +10,7 @@ const { markConversationDeliveredBy } = require('../utils/deliveryReceiptUtils')
 const { resolveLastMessagePreview } = require('../utils/mediaAlbum');
 const { resolveReplyTarget } = require('../utils/resolveReplyToID');
 const { HISTORY_CUTOFF_SQL } = require('../utils/messageHistoryFilter');
+const { enregistrerSuppressions, lireSuppressions } = require('../utils/messageTombstone');
 const { appliquerStatutLecteur } = require('../utils/groupReceipts');
 const { messageInsertSql, messageInsertParams, insertMessageThumb } = require('../utils/messageInsert');
 const {
@@ -685,6 +686,7 @@ const supprimerPourTous = async (acteurID, ids, { maintenant = Date.now() } = {}
           WHERE msgID IN (${aSupprimer.map(() => '?').join(',')}) AND isDeleted = 0`,
         aSupprimer.map((r) => r.msgID),
       );
+      await enregistrerSuppressions(conn, acteurID, aSupprimer);
       const parConversation = new Map();
       for (const r of aSupprimer) {
         parConversation.set(r.conversationID, (parConversation.get(r.conversationID) || 0) + 1);
@@ -1387,6 +1389,20 @@ const batchForwardMessages = async (req, res) => {
  * Curseur PAR conversation (et non global) : sinon, être à jour dans une conv
  * (msgID élevé) masquerait d'anciens messages manquants d'une autre conv.
  */
+/**
+ * POST /messages/deletions — rattrapage des suppressions POUR TOUS manquées hors
+ * ligne. Corps : `{ after?: number, limit?: number }` ; sans `after`, renvoie
+ * seulement la position courante (`cursor`) à mémoriser. Réponse :
+ * `{ deletions: [{msgID, conversationID, deletedBy}], cursor, hasMore }`.
+ */
+const getDeletionsSince = async (req, res) => {
+  const out = await lireSuppressions(pool, req.user.alanyaID, {
+    apres: req.body?.after,
+    limite: req.body?.limit,
+  });
+  res.json(out);
+};
+
 const getMessagesSince = async (req, res) => {
   try {
     const alanyaID = req.user.alanyaID;
@@ -1593,6 +1609,7 @@ const markMessagesDelivered = async (req, res, next) => {
 module.exports = {
   getMessages,
   getMessagesSince,
+  getDeletionsSince,
   sendMessage,
   updateMessage,
   deleteMessage,

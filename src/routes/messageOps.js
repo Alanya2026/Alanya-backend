@@ -3,7 +3,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const requireOutgoing = require('../middleware/requireOutgoing');
 const { getMessageReceipts } = require('../controllers/messageReceiptsController');
-const { updateMessage, deleteMessage, batchDeleteMessages, batchForwardMessages, pinMessage, markMessageViewed, setReaction, removeReaction, getMessagesSince, getMessageStatusByClientId, getPendingOutgoingMessages, markMessagesDelivered } = require('../controllers/messageController');
+const { updateMessage, deleteMessage, batchDeleteMessages, batchForwardMessages, pinMessage, markMessageViewed, setReaction, removeReaction, getMessagesSince, getDeletionsSince, getMessageStatusByClientId, getPendingOutgoingMessages, markMessagesDelivered } = require('../controllers/messageController');
 
 /**
  * @swagger
@@ -65,6 +65,32 @@ const { updateMessage, deleteMessage, batchDeleteMessages, batchForwardMessages,
 // Sync delta globale multi-conversations (curseur par conv). Déclarée avant
 // les routes `/:id` pour éviter toute capture par un pattern paramétré.
 router.post('/sync', auth, getMessagesSince);
+/**
+ * @swagger
+ * /api/messages/deletions:
+ *   post:
+ *     summary: Rattraper les suppressions pour tous manquées hors ligne
+ *     description: >
+ *       Complète `/messages/sync`, qui ne renvoie jamais les messages supprimés.
+ *       Sans `after`, ne rejoue rien et renvoie le curseur à mémoriser.
+ *     tags: [Messages]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               after:
+ *                 type: integer
+ *               limit:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: "{ deletions: [{msgID, conversationID, deletedBy}], cursor, hasMore }"
+ */
+router.post('/deletions', auth, getDeletionsSince);
 // Accusé de remise émis par la couche push (app fermée, pas de socket).
 // Équivalent HTTP de l'event socket `message:delivered`, idempotent.
 router.post('/delivered', auth, markMessagesDelivered);

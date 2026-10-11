@@ -119,6 +119,10 @@ function systemPreviewFromContent(content) {
     case 'settings_changed':
       return `${who} a modifié les réglages du groupe`;
 
+    // Capture d'écran d'une discussion à deux (POST /conversations/:id/screenshot).
+    case 'screenshot':
+      return `📸 ${who} a fait une capture d'écran`;
+
     // Lignes d'incident d'un trajet de confiance. Elles ne remontent pas la
     // conversation d'elles-mêmes (`postSystemMessage` ne touche pas à
     // `lastMessageAt`), mais si elles sont le dernier message du fil, l'aperçu
