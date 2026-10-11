@@ -33,6 +33,13 @@ const { normalizeMessageType } = require('../utils/messageType');
 // un hôte différent (cache, épinglage de certificat).
 const MEDIA_BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
+const {
+  decider: deciderSuppression,
+  chargerContextes: chargerContextesSuppression,
+  contexteDe: contexteSuppression,
+  SuppressionRefusee,
+} = require('../utils/messageDeletion');
+
 const MESSAGE_EDIT_WINDOW_MINUTES = 30;
 const MAX_BATCH_DELETE = 50;
 const MAX_BATCH_FORWARD_SOURCES = 20;
@@ -631,11 +638,115 @@ const updateMessage = async (req, res) => {
   }
 };
 
+/**
+ * Suppression POUR TOUS, unitaire ou par lot : une seule règle (voir
+ * `utils/messageDeletion` : fenêtre de 72 h, expéditeur ou administrateur de
+ * groupe), une seule transaction, tout ou rien — un seul refus annule le lot.
+ *
+ * Le compteur `message_count` ne baisse que des messages RÉELLEMENT supprimés
+ * par cet appel : redemander la suppression d'un message déjà supprimé n'enlève
+ * plus rien (le chemin par lot décrémentait avant pour chaque ligne trouvée).
+ *
+ * @returns {Promise<Array<{msgID:number, conversationID:number, parAdmin:boolean}>>}
+ * @throws {SuppressionRefusee} 404 MESSAGE_NOT_FOUND, 403 FORBIDDEN, 403 DELETE_WINDOW_EXPIRED
+ */
+const supprimerPourTous = async (acteurID, ids, { maintenant = Date.now() } = {}) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const marques = ids.map(() => '?').join(',');
+    const [lignes] = await conn.execute(
+      `SELECT msgID, senderID, conversationID, sendAt, type, isDeleted
+         FROM message WHERE msgID IN (${marques}) FOR UPDATE`,
+      ids,
+    );
+    const parId = new Map(lignes.map((l) => [Number(l.msgID), l]));
+    if (parId.size !== ids.length) {
+      throw new SuppressionRefusee(404, 'MESSAGE_NOT_FOUND', 'Un ou plusieurs messages introuvables');
+    }
+    const contextes = await chargerContextesSuppression(conn, acteurID, lignes);
+
+    const resultats = [];
+    for (const id of ids) {
+      const l = parId.get(id);
+      const d = deciderSuppression({
+        acteurID, message: l, contexte: contexteSuppression(contextes, l), maintenant,
+      });
+      if (!d.ok) throw new SuppressionRefusee(d.status, d.code, d.message);
+      resultats.push({
+        msgID: id, conversationID: Number(l.conversationID), parAdmin: d.parAdmin, dejaSupprime: d.dejaSupprime,
+      });
+    }
+
+    const aSupprimer = resultats.filter((r) => !r.dejaSupprime);
+    if (aSupprimer.length > 0) {
+      await conn.execute(
+        `UPDATE message SET isDeleted = 1, deletedForID = NULL
+          WHERE msgID IN (${aSupprimer.map(() => '?').join(',')}) AND isDeleted = 0`,
+        aSupprimer.map((r) => r.msgID),
+      );
+      const parConversation = new Map();
+      for (const r of aSupprimer) {
+        parConversation.set(r.conversationID, (parConversation.get(r.conversationID) || 0) + 1);
+      }
+      for (const [conversationID, n] of parConversation) {
+        await conn.execute(
+          'UPDATE conversation SET message_count = GREATEST(0, message_count - ?) WHERE conversID = ?',
+          [n, conversationID],
+        );
+      }
+    }
+    await conn.commit();
+    return resultats;
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+};
+
+/** Traduit un refus de suppression en réponse HTTP ; toute autre erreur remonte. */
+const repondreSuppression = (res, error) => {
+  if (error instanceof SuppressionRefusee) {
+    return res.status(error.status).json({ error: error.message, code: error.code });
+  }
+  throw error;
+};
+
 const deleteMessage = async (req, res) => {
   try {
     const { id } = req.params;
     const { all } = req.query;
     const senderID = req.user.alanyaID;
+
+    // Pour TOUS : expéditeur dans les 72 h, ou administrateur de groupe (même règle
+    // que le lot). « Pour moi » reste ci-dessous, inchangé.
+    if (all === 'true') {
+      const msgID = parseInt(id, 10);
+      if (!(msgID > 0)) {
+        return res.status(404).json({ error: 'Message introuvable ou non autorisé', code: 'MESSAGE_NOT_FOUND' });
+      }
+      let resultats;
+      try {
+        resultats = await supprimerPourTous(senderID, [msgID]);
+      } catch (e) {
+        return repondreSuppression(res, e);
+      }
+      const r = resultats[0];
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`conversation_${r.conversationID}`).emit('message:deleted', {
+          msgID,
+          conversationID: r.conversationID,
+          all: true,
+          deletedForID: null,
+          deletedBy: senderID,
+          byAdmin: r.parAdmin,
+        });
+      }
+      return res.json({ message: 'Message supprimé', all: true });
+    }
 
     const [existing] = await pool.execute(
       'SELECT * FROM message WHERE msgID = ? AND senderID = ?',
@@ -646,35 +757,22 @@ const deleteMessage = async (req, res) => {
       return res.status(404).json({ error: 'Message introuvable ou non autorisé', code: 'MESSAGE_NOT_FOUND' });
     }
 
-    if (all === 'true') {
-      if (!existing[0].isDeleted) {
-        await pool.execute(
-          'UPDATE message SET isDeleted = 1, deletedForID = NULL WHERE msgID = ?',
-          [id],
-        );
-        await pool.execute(
-          'UPDATE conversation SET message_count = GREATEST(0, message_count - 1) WHERE conversID = ?',
-          [existing[0].conversationID],
-        );
-      }
-    } else {
-      await pool.execute(
-        'UPDATE message SET deletedForID = ? WHERE msgID = ?',
-        [senderID, id]
-      );
-    }
+    await pool.execute(
+      'UPDATE message SET deletedForID = ? WHERE msgID = ?',
+      [senderID, id]
+    );
 
     const io = req.app.get('io');
     if (io && existing[0]) {
       io.to(`conversation_${existing[0].conversationID}`).emit('message:deleted', {
         msgID: parseInt(id),
         conversationID: existing[0].conversationID,
-        all: all === 'true',
-        deletedForID: all === 'true' ? null : senderID,
+        all: false,
+        deletedForID: senderID,
       });
     }
 
-    res.json({ message: 'Message supprimé', all: all === 'true' });
+    res.json({ message: 'Message supprimé', all: false });
   } catch (error) {
     throw error;
   }
@@ -1007,6 +1105,10 @@ const markMessageViewed = async (req, res) => {
 
 const batchDeleteMessages = async (req, res) => {
   const conn = await pool.getConnection();
+  // `supprimerPourTous` prend sa propre connexion : on rend la nôtre tout de
+  // suite sur ce chemin, au lieu de tenir deux connexions par requête.
+  let rendue = false;
+  const rendre = () => { if (!rendue) { rendue = true; conn.release(); } };
   try {
     const { msgIDs, all } = req.body;
     const senderID = req.user.alanyaID;
@@ -1022,6 +1124,37 @@ const batchDeleteMessages = async (req, res) => {
     const ids = [...new Set(msgIDs.map((id) => parseInt(id, 10)).filter((id) => id > 0))];
     if (ids.length !== msgIDs.length) {
       return res.status(400).json({ error: 'msgIDs invalides ou dupliqués', code: 'INVALID_MSG_IDS' });
+    }
+
+    // Pour TOUS : la même règle que le chemin unitaire (72 h, expéditeur ou
+    // administrateur de groupe), dans `supprimerPourTous`.
+    if (forAll) {
+      rendre();
+      let resultats;
+      try {
+        resultats = await supprimerPourTous(senderID, ids);
+      } catch (e) {
+        return repondreSuppression(res, e);
+      }
+      const parConversation = new Map();
+      for (const r of resultats) {
+        if (!parConversation.has(r.conversationID)) parConversation.set(r.conversationID, []);
+        parConversation.get(r.conversationID).push(r);
+      }
+      const io = req.app.get('io');
+      if (io) {
+        for (const [conversationID, rs] of parConversation) {
+          io.to(`conversation_${conversationID}`).emit('messages:deleted', {
+            conversationID,
+            msgIDs: rs.map((r) => r.msgID),
+            all: true,
+            deletedForID: null,
+            deletedBy: senderID,
+            byAdminMsgIDs: rs.filter((r) => r.parAdmin).map((r) => r.msgID),
+          });
+        }
+      }
+      return res.json({ deleted: ids.length, all: true });
     }
 
     await conn.beginTransaction();
@@ -1043,23 +1176,10 @@ const batchDeleteMessages = async (req, res) => {
       return res.status(403).json({ error: 'Non autorisé pour un ou plusieurs messages', code: 'FORBIDDEN' });
     }
 
-    if (forAll) {
-      await conn.execute(
-        `UPDATE message SET isDeleted = 1, deletedForID = NULL WHERE msgID IN (${placeholders}) AND isDeleted = 0`,
-        ids,
-      );
-      for (const row of existing) {
-        await conn.execute(
-          'UPDATE conversation SET message_count = GREATEST(0, message_count - 1) WHERE conversID = ?',
-          [row.conversationID],
-        );
-      }
-    } else {
-      await conn.execute(
-        `UPDATE message SET deletedForID = ? WHERE msgID IN (${placeholders})`,
-        [senderID, ...ids]
-      );
-    }
+    await conn.execute(
+      `UPDATE message SET deletedForID = ? WHERE msgID IN (${placeholders})`,
+      [senderID, ...ids]
+    );
 
     await conn.commit();
 
@@ -1084,10 +1204,10 @@ const batchDeleteMessages = async (req, res) => {
 
     res.json({ deleted: ids.length, all: forAll });
   } catch (error) {
-    await conn.rollback();
+    if (!rendue) await conn.rollback();
     throw error;
   } finally {
-    conn.release();
+    rendre();
   }
 };
 

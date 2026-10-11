@@ -48,10 +48,19 @@ const { updateMessage, deleteMessage, batchDeleteMessages, batchForwardMessages,
  *         name: all
  *         schema:
  *           type: boolean
- *         description: Supprimer pour tous (true) ou seulement pour soi
+ *         description: >
+ *           Supprimer pour tous (true) ou seulement pour soi. Pour tous : dans les
+ *           72 heures suivant l'envoi (sinon 403 DELETE_WINDOW_EXPIRED), par
+ *           l'expéditeur ou, dans un groupe, par un administrateur (message d'un
+ *           membre) ou le propriétaire (membre ou administrateur) ; sinon 403
+ *           FORBIDDEN. Tout participant absent : 404 MESSAGE_NOT_FOUND.
  *     responses:
  *       200:
  *         description: Message supprimé
+ *       403:
+ *         description: DELETE_WINDOW_EXPIRED ou FORBIDDEN
+ *       404:
+ *         description: MESSAGE_NOT_FOUND
  */
 // Sync delta globale multi-conversations (curseur par conv). Déclarée avant
 // les routes `/:id` pour éviter toute capture par un pattern paramétré.

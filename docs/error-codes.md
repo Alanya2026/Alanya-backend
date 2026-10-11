@@ -86,6 +86,7 @@ sont valides mais rendus par le repli lié au statut HTTP.
 | `GROUP_ADMINS_ONLY` | 403 | Réservé aux administrateurs |
 | `GROUP_OWNER_REQUIRED` | 403 | Réservé au propriétaire |
 | `CONVERSATION_NOT_FOUND` | 404 | Conversation absente |
+| `DELETE_WINDOW_EXPIRED` | 403 | Suppression pour tous refusée : plus de 72 heures depuis l'envoi (expéditeur comme administrateur) |
 | `OFFICIAL_READONLY` | 403 | Compte officiel sans réponse |
 | `LIST_MEMBER_LIMIT` | 409 | Liste pleine |
 | `SYSTEM_LIST_READONLY` | 403 | Liste système non modifiable |
@@ -243,7 +244,7 @@ correctif — un code non traduit ne fait rien afficher de brut.
 - `CANNOT_TARGET_SUPERADMIN` · `CLIENT_ID_REQUIRED` · `CONTACT_ALREADY_EXISTS`
 - `CONTACT_NOT_FOUND` · `CONTENT_REQUIRED` · `CONVERSATION_FORBIDDEN`
 - `CONVERSATION_ID_REQUIRED` · `CRITERIA_REQUIRED` · `DECISION_NOT_FOUND`
-- `DEVICE_ID_REQUIRED` · `DEVICE_NOT_FOUND` · `DOCUMENT_NOT_FOUND`
+- `DELETE_WINDOW_EXPIRED` · `DEVICE_ID_REQUIRED` · `DEVICE_NOT_FOUND` · `DOCUMENT_NOT_FOUND`
 - `DOCUMENT_PURGED` · `DUPLICATE_ENTRY` · `EDIT_WINDOW_EXPIRED`
 - `EMAIL_REQUIRED` · `EMAIL_TAKEN` · `EMOJI_REQUIRED`
 - `ESTIMATE_STALE` · `EXPORT_EXPIRED` · `EXPORT_FAILED`
