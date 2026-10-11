@@ -132,7 +132,7 @@ Contrat : `CONTRAT-STICKERS.md` §5 et §9. Aussi émis par `message:send_failed
 | Code | Statut | Sens |
 |---|---|---|
 | `STICKER_NOT_FOUND` | 404 | Sticker inconnu, ou fichier retiré (suppression par l'auteur, retrait admin) |
-| `STICKER_PACK_UNAVAILABLE` | 404 | Pack brouillon, archivé non installé, ou non officiel (V1a). V1b : pack perso d'un autre compte (jamais « interdit » : même réponse qu'un pack inexistant), pack perso archivé, lien de partage mal formé, inconnu, révoqué ou d'un pack archivé (réponse identique pour les quatre) |
+| `STICKER_PACK_UNAVAILABLE` | 404 | Pack officiel brouillon ou archivé (installé ou non : archivé = indisponible, A14 ; à l'envoi, au transfert, en lecture et à l'installation), ou non officiel (V1a). V1b : pack perso d'un autre compte (jamais « interdit » : même réponse qu'un pack inexistant), pack perso archivé, lien de partage mal formé, inconnu, révoqué ou d'un pack archivé (réponse identique pour les quatre) |
 | `STICKER_INVALID_PAYLOAD` | 400 | `content` du type 10 illisible, version inconnue, `sid` invalide ou plus de 512 octets ; aussi stickers fermés pour ce compte. V1b : corps de requête mal formé (`PATCH /packs/:id`, `PUT /packs/:id/order`, `POST /packs/:id/stickers`), nom vide, partage d'un pack vide |
 | `STICKER_ASSET_INVALID` | 422 | Upload refusé : format réel ni PNG ni WebP, pas 512×512, sans alpha, animé, trop lourd, corrompu (V1b, administration) |
 | `STICKER_ASSET_BLOCKED` | 422 | Empreinte du fichier présente dans `sticker_blocklist` |

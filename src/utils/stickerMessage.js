@@ -172,12 +172,12 @@ async function prepareStickerMessage({ content, senderID }, deps = depsParDefaut
   const statut = Number(s.pack_status);
   const installe = Number(s.installed) === 1;
   if (visibilite === PACK_VISIBILITY.OFFICIEL) {
-    // Publié : ouvert. Archivé : ouvert à qui l'a déjà installé (décision 9) —
-    // un pack qu'on retire du catalogue ne casse pas les habitudes de ses
-    // utilisateurs. Brouillon : jamais.
-    if (statut !== PACK_STATUS.PUBLIE && !(statut === PACK_STATUS.ARCHIVE && installe)) {
-      throw refus('STICKER_PACK_UNAVAILABLE');
-    }
+    // Publié seulement (A14). Un pack archivé est « indisponible » : plus
+    // d'envoi, MÊME pour qui l'a installé (remplace l'ancienne décision 9). Les
+    // anciens messages restent affichables (`mediaUrl` recopiée, fichier
+    // conservé) : rien ici ne les touche. Brouillon : jamais. Republié (status
+    // 1) : redevient envoyable aussitôt.
+    if (statut !== PACK_STATUS.PUBLIE) throw refus('STICKER_PACK_UNAVAILABLE');
   } else if (visibilite === PACK_VISIBILITY.PRIVE || visibilite === PACK_VISIBILITY.LIEN) {
     // Pack perso : un pack archivé par son propriétaire (`status = 2`) n'envoie
     // plus, pour personne.

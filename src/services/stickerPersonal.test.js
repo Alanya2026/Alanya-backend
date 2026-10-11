@@ -103,7 +103,7 @@ const BLOCKLIST_RE = /SELECT 1 FROM sticker_blocklist WHERE sha256 = \?/i;
 const INSERT_ASSET_RE = /INSERT INTO sticker_asset/i;
 const INSERT_STICKER_RE = /INSERT INTO sticker \(/i;
 const UPDATE_KEY_RE = /UPDATE sticker_asset SET storage_key/i;
-const ASSET_OWNER_RE = /SELECT id, storage_key, thumb_key FROM sticker_asset WHERE id = \? AND owner_id = \? FOR UPDATE/i;
+const ASSET_OWNER_RE = /SELECT id FROM sticker_asset WHERE id = \? AND owner_id = \? FOR UPDATE/i;
 const STICKERS_ASSET_RE = /SELECT id FROM sticker WHERE asset_id = \?/i;
 const REPORT_ASSET_RE = /SELECT id, owner_id, status FROM sticker_asset WHERE id = \? LIMIT 1/i;
 const REPORT_DEJA_RE = /SELECT id FROM sticker_report WHERE asset_id = \? AND reporter_id = \?/i;
@@ -268,6 +268,37 @@ test('copierStickerPerso : copie le fichier côté stockage, jamais les octets',
   assert.ok(d.requetes.some(([s]) => UPDATE_KEY_RE.test(s)));
 });
 
+test('copie puis suppression de l\'original : la copie garde son actif, son sticker et son fichier (B)', async () => {
+  videStockage();
+  // 1. Le compte 7 copie le sticker (actif 5, propriétaire 9) : actif 11, sticker 21, fichiers à lui.
+  const copie = base([
+    [SRC_ASSET_RE, () => [[sourceCopiable({ owner_id: 9, storage_key: 'stickers/u/9/orig_a.webp', thumb_key: 'stickers/u/9/orig_a_t.webp' })], []]],
+    [BLOCKLIST_RE, () => [[], []]],
+    [PACK_DEFAUT_RE, () => [[{ id: 3, code: 'u_7_x' }], []]],
+    [COUNT_STICKER_RE, () => [[{ n: 0 }], []]],
+    [OWNED_SHA_RE, () => [[], []]],
+    [INSERT_ASSET_RE, () => [{ insertId: 11 }, []]],
+    [INSERT_STICKER_RE, () => [{ insertId: 21 }, []]],
+    [UPDATE_KEY_RE, () => [{ affectedRows: 1 }, []]],
+  ]);
+  const r = await sp.copierStickerPerso({ alanyaID: 7, assetId: 5 }, copie);
+  assert.deepStrictEqual([r.assetId, r.stickerId], [11, 21]);
+  const [, pInsert] = copie.requetes.find(([sql]) => INSERT_ASSET_RE.test(sql));
+  assert.strictEqual(pInsert[0], 7, 'l\'actif copié appartient au copieur');
+  assert.ok(stockage.copies.every(([src, dst]) => src.startsWith('stickers/u/9/') && dst.startsWith('stickers/u/7/') && src !== dst), 'fichiers distincts de ceux de l\'original');
+  // 2. Le propriétaire 9 supprime l'original (actif 5, stickers 50 et 51).
+  videStockage();
+  const suppr = base([
+    [ASSET_OWNER_RE, () => [[{ id: 5 }], []]],
+    [STICKERS_ASSET_RE, () => [[{ id: 50 }, { id: 51 }], []]],
+  ]);
+  await sp.supprimerAssetPerso(9, 5, suppr);
+  for (const [sql, params] of suppr.requetes.filter(([q]) => /^\s*(DELETE|UPDATE)/i.test(q))) {
+    assert.ok((params || []).map(Number).every((v) => [5, 50, 51].includes(v)), `touche la copie : ${sql} ${JSON.stringify(params)}`);
+  }
+  assert.strictEqual(stockage.retires.length, 0, 'le fichier de l\'original reste servi (les anciens messages s\'affichent) ; celui de la copie aussi');
+});
+
 test('copierStickerPerso : refuse une image de la liste de blocage', async () => {
   videStockage();
   const d = base([
@@ -287,7 +318,7 @@ test('copierStickerPerso : un actif retiré (status ≠ 0) est introuvable', asy
 
 // ── 7. supprimerAssetPerso ──────────────────────────────────────────────────
 
-test('supprimerAssetPerso : supprime sticker, favoris, signalements et fichiers', async () => {
+test('supprimerAssetPerso : supprime sticker, favoris, signalements — et AUCUN fichier (A13)', async () => {
   videStockage();
   const d = base([
     [ASSET_OWNER_RE, () => [[{ id: 10, storage_key: 'stickers/u/7/x_a.webp', thumb_key: 'stickers/u/7/x_a_t.webp' }], []]],
@@ -304,8 +335,33 @@ test('supprimerAssetPerso : supprime sticker, favoris, signalements et fichiers'
   ]) {
     assert.ok(d.requetes.some(([s]) => re.test(s)), `requête absente : ${re}`);
   }
-  assert.ok(stockage.retires.includes('stickers/u/7/x_a.webp'), 'image retirée');
-  assert.ok(stockage.retires.includes('stickers/u/7/x_a_t.webp'), 'vignette retirée');
+  assert.deepStrictEqual(stockage.retires, [], 'aucune suppression de fichier : l\'image et la vignette restent servies');
+});
+
+test('supprimerAssetPerso : ne touche que l\'actif d\'origine, jamais les copies ni les packs installés (B)', async () => {
+  videStockage();
+  // Mon actif 10 porte les stickers 5 et 6. Les copies faites par d'autres
+  // comptes sont d'AUTRES actifs (11, 12…) avec leurs propres stickers (50, 60) :
+  // aucune requête d'écriture ne doit les viser.
+  const d = base([
+    [ASSET_OWNER_RE, () => [[{ id: 10, storage_key: 'stickers/u/7/x_a.webp', thumb_key: 'stickers/u/7/x_a_t.webp' }], []]],
+    [STICKERS_ASSET_RE, () => [[{ id: 5 }, { id: 6 }], []]],
+  ]);
+  await sp.supprimerAssetPerso(7, 10, d);
+  const ecritures = d.requetes.filter(([sql]) => /^\s*(DELETE|UPDATE|INSERT)/i.test(sql));
+  assert.ok(ecritures.length > 0);
+  for (const [sql, params] of ecritures) {
+    const valeurs = (params || []).map(Number);
+    assert.ok(valeurs.every((v) => [5, 6, 10].includes(v)), `écriture hors de l'original : ${sql} ${JSON.stringify(params)}`);
+    assert.ok(!/user_sticker_pack|sticker_pack\s+SET\s+(status|visibility|share_token)|DELETE FROM sticker_pack/i.test(sql), `pack touché : ${sql}`);
+    assert.ok(!/source_pack_id/i.test(sql), 'les copies (source_pack_id) ne sont pas lues');
+  }
+  // La lecture du propriétaire est dans la requête : l'actif d'un autre est introuvable.
+  const [lecture, pLecture] = d.requetes.find(([sql]) => ASSET_OWNER_RE.test(sql));
+  assert.match(lecture, /owner_id = \?/);
+  assert.deepStrictEqual(pLecture, [10, 7]);
+  assert.strictEqual(stockage.retires.length, 0);
+  assert.strictEqual(stockage.copies.length, 0);
 });
 
 test('supprimerAssetPerso : refuse un actif dont je ne suis pas propriétaire', async () => {
@@ -359,10 +415,14 @@ const ligneRecue = (extra = {}) => ({
   is_premium: 0, asset_status: 0, partage_conv: 0, ...extra,
 });
 
-test('accesStickerRecu : officiel publié ou archivé, jamais brouillon', () => {
+test('accesStickerRecu : officiel PUBLIÉ seulement (archivé = indisponible, A14), jamais brouillon', () => {
   assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 1 }), 7), true);
-  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 2 }), 7), true);
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 2 }), 7), false, 'archivé : indisponible');
   assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 0 }), 7), false);
+  // L'état « installé » n'y change rien : la règle ne le lit pas.
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 2, installed: 1 }), 7), false);
+  // Republié : redevient accessible.
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 1 }), 7), true, 'republié');
 });
 
 test('accesStickerRecu : actif retiré refusé partout', () => {
@@ -516,9 +576,9 @@ test('resoudreAssetRecu : propriétaire de l\'actif, même hors de tout pack', a
 });
 
 test('resoudreAssetRecu : accès légitime = règle de resoudreStickerRecu', async () => {
-  // officiel publié et archivé
-  for (const pack_status of [1, 2]) {
-    const r = await sp.resoudreAssetRecu(7, '5', accesAsset([ligneAsset({ pack_status })]));
+  // officiel publié (l'archivé est refusé : voir plus bas)
+  {
+    const r = await sp.resoudreAssetRecu(7, '5', accesAsset([ligneAsset({ pack_status: 1 })]));
     assert.deepStrictEqual(r, { assetId: 5, proprietaire: false, isPremium: false });
   }
   // perso (privé et lien) : publié + co-participant
@@ -554,6 +614,7 @@ test('resoudreAssetRecu : refusés = MÊME 404 (privé d\'un autre, retiré, bro
     'privé d\'un autre : pack brouillon, même co-participant': [ligneAsset({ asset_owner: 9, visibility: 1, pack_status: 0, pack_owner: 9, partage_conv: 1 })],
     'privé d\'un autre : pack archivé, même co-participant': [ligneAsset({ asset_owner: 9, visibility: 1, pack_status: 2, pack_owner: 9, partage_conv: 1 })],
     'officiel : pack brouillon': [ligneAsset({ pack_status: 0 })],
+    'officiel : pack archivé (indisponible, A14)': [ligneAsset({ pack_status: 2 })],
     'actif orphelin d\'un autre (aucun sticker)': [ligneAsset({ asset_owner: 9, sticker_id: null, visibility: null, pack_status: null })],
     'visibilité inconnue': [ligneAsset({ asset_owner: 9, visibility: 9, pack_owner: 9, partage_conv: 1 })],
   };
@@ -572,6 +633,38 @@ test('resoudreAssetRecu : refusés = MÊME 404 (privé d\'un autre, retiré, bro
   for (const [libelle, status, message] of erreurs) {
     assert.deepStrictEqual([status, message], [st, msg], `réponse distincte : ${libelle}`);
   }
+});
+
+test('officiel ARCHIVÉ (A14) : copie et signalement, par sid comme par assetId = même 404, rien de copié ni d\'écrit', async () => {
+  for (const pack_status of [2, 0]) {
+    videStockage();
+    const parSid = base([[RESOLU_RE, () => [[ligneRecue({ pack_status })], []]]]);
+    const e1 = await attendErreur(() => sp.copierStickerRecu({ alanyaID: 7, stickerId: 30 }, parSid), NOT_FOUND);
+    const e2 = await attendErreur(() => sp.signalerStickerRecu({ alanyaID: 7, stickerId: 30, reason: 'spam' }, parSid), NOT_FOUND);
+    const parAsset = accesAsset([ligneAsset({ pack_status })]);
+    const e3 = await attendErreur(() => sp.copierAssetRecu({ alanyaID: 7, assetId: 5 }, parAsset), NOT_FOUND);
+    const e4 = await attendErreur(() => sp.signalerAssetRecu({ alanyaID: 7, assetId: 5, reason: 'spam' }, parAsset), NOT_FOUND);
+    for (const e of [e1, e2, e3, e4]) assert.deepStrictEqual([e.status, e.message], [e1.status, e1.message]);
+    assert.strictEqual(stockage.copies.length, 0, 'aucun fichier copié');
+    for (const d of [parSid, parAsset]) {
+      assert.ok(!d.requetes.some(([sql]) => /^\s*(INSERT|UPDATE|DELETE)/i.test(sql)), 'aucune écriture');
+    }
+  }
+  // Republié : redevient copiable.
+  videStockage();
+  const d = base([
+    [RESOLU_RE, () => [[ligneRecue({ pack_status: 1 })], []]],
+    [SRC_ASSET_RE, () => [[sourceCopiable()], []]],
+    [BLOCKLIST_RE, () => [[], []]],
+    [PACK_DEFAUT_RE, () => [[{ id: 3, code: 'u_7_x' }], []]],
+    [COUNT_STICKER_RE, () => [[{ n: 0 }], []]],
+    [OWNED_SHA_RE, () => [[], []]],
+    [INSERT_ASSET_RE, () => [{ insertId: 11 }, []]],
+    [INSERT_STICKER_RE, () => [{ insertId: 21 }, []]],
+    [UPDATE_KEY_RE, () => [{ affectedRows: 1 }, []]],
+  ]);
+  const r = await sp.copierStickerRecu({ alanyaID: 7, stickerId: 30 }, d);
+  assert.strictEqual(r.copie, true, 'republié : copiable de nouveau');
 });
 
 test('copierAssetRecu : propriétaire et accès légitime copient (réponse inchangée)', async () => {

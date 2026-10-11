@@ -105,6 +105,24 @@ async function nettoyer() {
     await store.retirerFavori(COMPTE, s0);
     assert.ok(!(await store.chargeMoi(COMPTE)).favorites.includes(s0));
 
+    // Pack officiel ARCHIVÉ = indisponible (A14) : absent du catalogue, de /me
+    // (packs installés et favoris), non favorisable ; l'installation reste en
+    // base et le pack republié reparaît tel quel.
+    await store.ajouterFavori(COMPTE, s0);
+    assert.ok((await store.chargeMoi(COMPTE)).packs.some((x) => x.id === packId), 'publié installé : listé');
+    await pool.execute('UPDATE sticker_pack SET status = 2 WHERE id = ?', [packId]);
+    assert.ok(!(await store.listeCatalogue()).packs.some((x) => x.id === packId), 'archivé : absent du catalogue');
+    moi = await store.chargeMoi(COMPTE);
+    assert.ok(!moi.packs.some((x) => x.id === packId), 'archivé installé : absent de /me');
+    assert.ok(!moi.favorites.includes(s0), 'favori d\'un pack archivé : absent de /me');
+    assert.strictEqual(await store.chargeStickerFavorisable(s0), null, 'archivé : non favorisable');
+    assert.strictEqual(Number((await store.chargeStickerPourEnvoi(s0, COMPTE)).pack_status), 2, 'le store rend le statut, l\'envoi refuse');
+    await pool.execute('UPDATE sticker_pack SET status = 1 WHERE id = ?', [packId]);
+    moi = await store.chargeMoi(COMPTE);
+    assert.ok(moi.packs.some((x) => x.id === packId), 'republié : de nouveau dans /me, sans réinstaller');
+    assert.ok(moi.favorites.includes(s0), 'republié : favori de retour');
+    await store.retirerFavori(COMPTE, s0);
+
     // Ordre
     const [p2] = await pool.execute(
       `INSERT INTO sticker_pack (code, name_i18n, visibility, status, created_by) VALUES (?, '{"fr":"B"}', 0, 1, 0)`,

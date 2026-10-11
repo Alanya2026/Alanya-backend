@@ -43,9 +43,13 @@ const idPositif = (raw) => {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 };
 
-/** Un pack se montre s'il est publié, ou archivé mais déjà installé (décision 9). */
-const packVisible = (p) => Number(p.status) === PACK_STATUS.PUBLIE
-  || (Number(p.status) === PACK_STATUS.ARCHIVE && Number(p.installed) === 1);
+/**
+ * Un pack officiel n'est disponible que PUBLIÉ (A14). Archivé, il est
+ * « indisponible » partout (lecture, installation, envoi, copie), installé ou
+ * non ; brouillon, jamais. Ses anciens messages restent affichés côté app
+ * (`mediaUrl` recopiée, fichier conservé) : rien ici ne les touche.
+ */
+const packVisible = (p) => Number(p.status) === PACK_STATUS.PUBLIE;
 
 const refuseServeur = (res, tag, e) => {
   console.error(`[stickers] ${tag}`, e);

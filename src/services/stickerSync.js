@@ -21,4 +21,16 @@ function emitStickersSync(io, alanyaID, reason) {
   io.to(`user_${alanyaID}`).emit('stickers:sync', syncPayload(reason));
 }
 
-module.exports = { REASONS, syncPayload, emitStickersSync };
+/**
+ * Émission à tous les appareils connectés : un changement du catalogue officiel
+ * (pack archivé ou republié par l'administration) touche chaque compte qui
+ * l'avait installé. L'événement ne porte aucune donnée ; le client relit
+ * `/me` et `/catalog`. Rare (action d'administration) : un envoi général suffit,
+ * sans parcourir les installations.
+ */
+function emitStickersSyncAll(io, reason = 'catalog') {
+  if (!io) return;
+  io.emit('stickers:sync', syncPayload(reason));
+}
+
+module.exports = { REASONS, syncPayload, emitStickersSync, emitStickersSyncAll };

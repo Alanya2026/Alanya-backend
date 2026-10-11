@@ -52,15 +52,16 @@ const _disconnectAllUserSockets = (io, alanyaID) => {
 
 /**
  * État stickers du compte pour l'export de données (plan §4 : `user_sticker_*`
- * entrent dans l'export). Les packs installés sont rendus par leur code lisible,
- * pas seulement par leur id. Migration 097 pas encore jouée :
+ * entrent dans l'export) : packs installés (code lisible), favoris, packs perso
+ * créés (métadonnées + stickers) et signalements émis. Pas de fichiers : l'export
+ * n'embarque pas non plus les médias de conversation, seulement leur description. Migration 097 pas encore jouée :
  * `ER_NO_SUCH_TABLE` rend une section vide plutôt que de faire échouer l'export.
  */
 const _chargeStickersExport = async (alanyaID) => {
   try {
     return await chargeStickersExport(alanyaID);
   } catch (e) {
-    if (e.code === 'ER_NO_SUCH_TABLE') return { installedPacks: [], favorites: [] };
+    if (e.code === 'ER_NO_SUCH_TABLE') return { installedPacks: [], favorites: [], createdPacks: [], reports: [] };
     throw e;
   }
 };

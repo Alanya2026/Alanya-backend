@@ -107,23 +107,31 @@ async function listeStickersDuPack(packId, db = pool) {
   return rows;
 }
 
-/** Packs installés et favoris du compte (ids seulement), et une version indicative. */
+/**
+ * Packs installés et favoris du compte (ids seulement), et une version indicative.
+ *
+ * Un pack officiel archivé est « indisponible » (A14) : il n'est plus renvoyé
+ * (la ligne d'installation reste en base, un pack republié reparaît tel quel),
+ * et ses stickers ne sont plus renvoyés en favoris. Le fichier et les anciens
+ * messages ne sont pas concernés.
+ */
 async function chargeMoi(alanyaID, db = pool) {
   const [packs] = await db.execute(
     `SELECT p.id, p.code, u.position
        FROM user_sticker_pack u JOIN sticker_pack p ON p.id = u.pack_id
-      WHERE u.alanyaID = ? AND p.visibility = ?
+      WHERE u.alanyaID = ? AND p.visibility = ? AND p.status = ?
       ORDER BY u.position ASC, u.added_at ASC`,
-    [alanyaID, OFFICIEL],
+    [alanyaID, OFFICIEL, STATUS_PUBLIE],
   );
   const [fav] = await db.execute(
     `SELECT f.sticker_id
        FROM user_sticker_favorite f
        JOIN sticker s ON s.id = f.sticker_id
+       JOIN sticker_pack p ON p.id = s.pack_id
        JOIN sticker_asset a ON a.id = s.asset_id
-      WHERE f.alanyaID = ? AND a.status = 0
+      WHERE f.alanyaID = ? AND a.status = 0 AND p.status = ?
       ORDER BY f.added_at ASC, f.sticker_id ASC`,
-    [alanyaID],
+    [alanyaID, STATUS_PUBLIE],
   );
   const [[v]] = await db.execute(
     `SELECT GREATEST(
@@ -139,10 +147,25 @@ async function chargeMoi(alanyaID, db = pool) {
   };
 }
 
+/** Motifs de signalement, par index stocké (`sticker_report.reason`) ; cf. `stickerPersonalService.RAISONS`. */
+const MOTIFS_SIGNALEMENT = Object.freeze(['inapproprie', 'spam', 'droits', 'autre']);
+
+/** Colonne JSON (objet ou texte, selon le pilote) → objet, ou `null`. */
+function jsonOuNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'object') return v;
+  try { return JSON.parse(v); } catch (_) { return null; }
+}
+
 /**
- * Données stickers d'un compte pour l'export de données (plan §4) : packs
- * installés (code lisible) et favoris, triés. Rend les lignes brutes ; l'appelant
- * décide de la forme exportée.
+ * Données stickers d'un compte pour l'export de données (plan §4) :
+ *  - `installedPacks`, `favorites` : lignes brutes, triées ;
+ *  - `createdPacks` : ses packs perso actifs (métadonnées + liste de ses
+ *    stickers : id, position, emoji, nom, id d'actif), SANS jeton de partage
+ *    (`shared` dit seulement si le lien est actif) ni clé de stockage ;
+ *  - `reports` : les signalements qu'il a émis (motif lisible).
+ * Aucun fichier : l'export n'embarque pas les médias, les stickers y sont
+ * décrits, pas copiés. L'appelant décide de la forme finale.
  */
 async function chargeStickersExport(alanyaID, db = pool) {
   const [installedPacks] = await db.execute(
@@ -160,7 +183,65 @@ async function chargeStickersExport(alanyaID, db = pool) {
       ORDER BY added_at`,
     [alanyaID],
   );
-  return { installedPacks, favorites };
+
+  const [packs] = await db.execute(
+    `SELECT p.id, p.code, p.name_i18n, p.description_i18n, p.visibility, p.status,
+            p.share_token, p.version, p.created_at
+       FROM sticker_pack p
+      WHERE p.owner_id = ? AND p.status <> 2
+      ORDER BY p.id`,
+    [alanyaID],
+  );
+  const [stickers] = await db.execute(
+    `SELECT s.id, s.pack_id, s.position, s.emoji, s.name_i18n, s.asset_id, a.animated
+       FROM sticker s
+       JOIN sticker_pack p ON p.id = s.pack_id
+       JOIN sticker_asset a ON a.id = s.asset_id
+      WHERE p.owner_id = ? AND p.status <> 2
+      ORDER BY s.pack_id, s.position`,
+    [alanyaID],
+  );
+  const parPack = new Map();
+  for (const st of stickers || []) {
+    const cle = Number(st.pack_id);
+    if (!parPack.has(cle)) parPack.set(cle, []);
+    parPack.get(cle).push({
+      id: Number(st.id),
+      position: Number(st.position),
+      emoji: st.emoji,
+      name: jsonOuNull(st.name_i18n),
+      asset_id: Number(st.asset_id),
+      animated: Number(st.animated) === 1,
+    });
+  }
+  const createdPacks = (packs || []).map((p) => ({
+    id: Number(p.id),
+    code: p.code,
+    name: jsonOuNull(p.name_i18n),
+    description: jsonOuNull(p.description_i18n),
+    visibility: Number(p.visibility),
+    status: Number(p.status),
+    shared: !!p.share_token,
+    version: Number(p.version),
+    created_at: p.created_at,
+    stickers: parPack.get(Number(p.id)) || [],
+  }));
+
+  const [signalements] = await db.execute(
+    `SELECT id, asset_id, reason, status, created_at
+       FROM sticker_report
+      WHERE reporter_id = ?
+      ORDER BY created_at, id`,
+    [alanyaID],
+  );
+  const reports = (signalements || []).map((r) => ({
+    asset_id: Number(r.asset_id),
+    reason: MOTIFS_SIGNALEMENT[Number(r.reason)] || 'autre',
+    status: Number(r.status),
+    created_at: r.created_at,
+  }));
+
+  return { installedPacks, favorites, createdPacks, reports };
 }
 
 async function compteInstalles(alanyaID, db = pool) {
@@ -218,16 +299,16 @@ async function ordonnerPacks(alanyaID, ids) {
   }
 }
 
-/** Un sticker favorisable : actif, dans un pack officiel publié (ou archivé). */
+/** Un sticker favorisable : actif, dans un pack officiel PUBLIÉ (archivé = indisponible, A14). */
 async function chargeStickerFavorisable(stickerId, db = pool) {
   const [rows] = await db.execute(
     `SELECT s.id
        FROM sticker s
        JOIN sticker_pack p ON p.id = s.pack_id
        JOIN sticker_asset a ON a.id = s.asset_id
-      WHERE s.id = ? AND a.status = 0 AND p.visibility = ? AND p.status IN (?, ?)
+      WHERE s.id = ? AND a.status = 0 AND p.visibility = ? AND p.status = ?
       LIMIT 1`,
-    [stickerId, OFFICIEL, STATUS_PUBLIE, STATUS_ARCHIVE],
+    [stickerId, OFFICIEL, STATUS_PUBLIE],
   );
   return rows[0] || null;
 }

@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const fix = (nom) => require(path.join(__dirname, '..', 'testUtils', 'stickers', nom));
 const { presentCatalog, presentPack, presentMe } = require('../utils/stickerPresenter');
 const { stickersOuverts, DEFAULTS } = require('./stickerSettingsService');
-const { syncPayload, emitStickersSync, REASONS } = require('./stickerSync');
+const { syncPayload, emitStickersSync, emitStickersSyncAll, REASONS } = require('./stickerSync');
 const storage = require('./mediaStorage');
 const { expiredMediaWhere } = require('./mediaRetention');
 const { makeFakeIo } = require('../testUtils/fakeIo');
@@ -88,6 +88,16 @@ const memesCles = (a, b, msg) => assert.deepStrictEqual(Object.keys(a).sort(), O
   assert.strictEqual(recu[0][2].reason, 'favorites');
   assert.ok(Number.isInteger(recu[0][2].version));
   emitStickersSync(null, 7, 'packs'); // sans io : ne plante pas
+  {
+    // Archivage / publication admin : diffusion à tous les appareils connectés.
+    const vus = [];
+    emitStickersSyncAll({ emit: (ev, p) => vus.push([ev, p]) }, 'catalog');
+    assert.strictEqual(vus.length, 1);
+    assert.strictEqual(vus[0][0], 'stickers:sync');
+    assert.strictEqual(vus[0][1].reason, 'catalog');
+    emitStickersSyncAll(null); // sans io : ne plante pas
+    assert.throws(() => emitStickersSyncAll({ emit() {} }, 'inconnue'), /inconnue/);
+  }
 }
 
 // ── Clés de stockage ───────────────────────────────────────────────────────

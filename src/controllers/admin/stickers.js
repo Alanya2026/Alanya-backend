@@ -9,6 +9,7 @@
 const { publicUrl } = require('../../services/mediaStorage');
 const { StickerSettingsInaccessibles } = require('../../services/stickerSettingsService');
 const admin = require('../../services/stickerAdminService');
+const { emitStickersSyncAll } = require('../../services/stickerSync');
 const { StickerAdminError, lireI18n } = admin;
 
 /** URL d'aperçu, tolérante à l'absence de clé. */
@@ -171,6 +172,7 @@ const deleteSticker = async (req, res) => {
 const publishPack = async (req, res) => {
   try {
     const r = await admin.publishPack(Number(req.params.id));
+    emitStickersSyncAll(req.app.get('io'), 'catalog');
     return res.json(r);
   } catch (e) {
     return repondreErreur(res, e, 'publishPack');
@@ -180,6 +182,8 @@ const publishPack = async (req, res) => {
 const archivePack = async (req, res) => {
   try {
     const r = await admin.archivePack(Number(req.params.id));
+    // Les appareils retirent le pack de leur plateau sans attendre leur prochaine synchro.
+    emitStickersSyncAll(req.app.get('io'), 'catalog');
     return res.json(r);
   } catch (e) {
     return repondreErreur(res, e, 'archivePack');

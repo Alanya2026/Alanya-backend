@@ -63,4 +63,17 @@ const RETENTION = {
   alertFloor: readInt('MEDIA_PURGE_ALERT_FLOOR', 1000, { min: 1, max: 1_000_000 }),
 };
 
-module.exports = { RETENTION };
+/**
+ * Préfixes de stockage que la purge « média de conversation » ne vise JAMAIS
+ * (plan stickers §9) :
+ *  - `official/` : médias officiels (accueil, diffusion, stickers officiels),
+ *    partagés par des milliers de messages ;
+ *  - `stickers/` : stickers personnels. Un sticker envoyé reste servi, même
+ *    après des années ; c'est la suppression du plan §4 qui s'applique
+ *    (suppression par l'auteur, du compte, ou retrait admin), jamais l'âge.
+ * La purge ne vise que `/uploads/media/` (`expiredMediaWhere`) ; cette liste
+ * le DÉCLARE pour l'écran des purges et pour les tests.
+ */
+const PREFIXES_JAMAIS_PURGES = Object.freeze(['official/', 'stickers/']);
+
+module.exports = { RETENTION, PREFIXES_JAMAIS_PURGES };

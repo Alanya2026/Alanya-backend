@@ -4,8 +4,9 @@
  *
  * Ce que le service garantit, et que ces tests éprouvent :
  *   - propriétaire seul : le pack d'un autre est « introuvable », aucune écriture ;
- *   - archivage : stickers retirés, fichiers supprimés SEULEMENT pour les actifs
- *     orphelins (règle du plan §4), lien révoqué, idempotent ;
+ *   - archivage : stickers retirés, lignes d'actifs orphelins supprimées, AUCUN
+ *     fichier supprimé (A13), lien révoqué, idempotent, copies et installations
+ *     des destinataires intactes (B) ;
  *   - réordonnancement : positions négatives d'abord (UNIQUE pack_id+position),
  *     ids étrangers ignorés ;
  *   - partage : jeton de 24 caractères aléatoires, révocable, pack vide refusé ;
@@ -170,14 +171,14 @@ test('modifierPack : coverStickerId null efface la couverture', async () => {
 
 // ── 3. archiverPack ─────────────────────────────────────────────────────────
 
-test('archiverPack : retire les stickers, ne supprime que les actifs orphelins', async () => {
+test('archiverPack : retire les stickers, ne supprime que les lignes d\'actifs orphelins — aucun fichier (A13)', async () => {
   videStockage();
   const d = base([
     PACK_OK,
     [/SELECT id FROM sticker WHERE pack_id = \? FOR UPDATE/, () => [[{ id: 11 }, { id: 12 }], []]],
     [/SELECT DISTINCT asset_id FROM sticker WHERE id IN/, () => [[{ asset_id: 100 }, { asset_id: 101 }], []]],
     // 100 est encore référencé ailleurs : seul 101 est orphelin
-    [/SELECT a\.id, a\.storage_key, a\.thumb_key FROM sticker_asset a/, () => [[{ id: 101, storage_key: 'stickers/u/7/s_b.webp', thumb_key: 'stickers/u/7/s_b_t.webp' }], []]],
+    [/SELECT a\.id FROM sticker_asset a/, () => [[{ id: 101, storage_key: 'stickers/u/7/s_b.webp', thumb_key: 'stickers/u/7/s_b_t.webp' }], []]],
   ]);
   const r = await pack.archiverPack(7, 3, d);
   assert.deepStrictEqual(r, { id: 3, deja: false, stickers: 2 });
@@ -191,11 +192,37 @@ test('archiverPack : retire les stickers, ne supprime que les actifs orphelins',
   ]) assert.ok(ecrit(d, re), `requête absente : ${re}`);
   const [, ids] = de(d, /DELETE FROM sticker_asset WHERE id IN/);
   assert.deepStrictEqual(ids, [101], 'seul l\'orphelin est supprimé');
-  const [, orph] = de(d, /SELECT a\.id, a\.storage_key/);
+  const [, orph] = de(d, /SELECT a\.id FROM sticker_asset a/);
   assert.strictEqual(orph[orph.length - 1], 7, 'orphelins cherchés parmi MES actifs seulement');
   const [, maj] = de(d, /SET status = \?, visibility = \?/);
   assert.deepStrictEqual(maj, [2, 1, 3], 'archivé (2), privé (1), pack 3');
-  assert.deepStrictEqual(stockage.retires.sort(), ['stickers/u/7/s_b.webp', 'stickers/u/7/s_b_t.webp'].sort());
+  assert.deepStrictEqual(stockage.retires, [], 'aucun fichier supprimé : l\'orphelin reste servi');
+});
+
+test('archiverPack : ne touche ni les copies ni les packs installés des destinataires (B)', async () => {
+  videStockage();
+  const d = base([
+    PACK_OK,
+    [/SELECT id FROM sticker WHERE pack_id = \? FOR UPDATE/, () => [[{ id: 11 }, { id: 12 }], []]],
+    [/SELECT DISTINCT asset_id FROM sticker WHERE id IN/, () => [[{ asset_id: 100 }, { asset_id: 101 }], []]],
+    [/SELECT a\.id FROM sticker_asset a/, () => [[{ id: 101, storage_key: 'stickers/u/7/s_b.webp', thumb_key: null }], []]],
+  ]);
+  await pack.archiverPack(7, 3, d);
+  // Une copie (`/stickers/:id/copy`) est un autre actif ; un lien installé est
+  // un autre pack (`source_pack_id` = 3) avec ses propres actifs et stickers.
+  // Les écritures ne visent que le pack 3, ses stickers (11, 12) et ses actifs (100, 101).
+  const ecritures = d.requetes.filter(([sql]) => /^\s*(DELETE|UPDATE|INSERT)/i.test(sql));
+  assert.ok(ecritures.length > 0);
+  for (const [sql, params] of ecritures) {
+    assert.ok((params || []).map(Number).every((v) => [3, 11, 12, 100, 101, 1, 2].includes(v)), `hors périmètre : ${sql} ${JSON.stringify(params)}`);
+    assert.ok(!/source_pack_id/i.test(sql), 'les packs copiés ne sont jamais lus ni écrits');
+    if (/user_sticker_pack/i.test(sql)) assert.deepStrictEqual(params, [3], 'seules les associations du pack archivé');
+    if (/sticker_pack/i.test(sql) && /^\s*(UPDATE|DELETE)/i.test(sql) && /WHERE id = \?/i.test(sql)) {
+      assert.strictEqual(params[params.length - 1], 3, 'seul le pack archivé est modifié');
+    }
+  }
+  assert.ok(!ecrit(d, /DELETE FROM sticker_pack\b/), 'aucune ligne de pack supprimée');
+  assert.strictEqual(stockage.retires.length + stockage.copies.length, 0);
 });
 
 test('archiverPack : aucun fichier supprimé quand rien n\'est orphelin', async () => {
@@ -313,7 +340,7 @@ test('retirerStickerDuPack : un sticker d\'un autre pack est introuvable', async
   assert.strictEqual(stockage.retires.length, 0);
 });
 
-test('retirerStickerDuPack : l\'actif encore référencé reste, l\'orphelin part avec ses fichiers', async () => {
+test('retirerStickerDuPack : l\'actif encore référencé reste, la ligne de l\'orphelin part — jamais de fichier (A13)', async () => {
   videStockage();
   // cas 1 : encore référencé ailleurs
   let d = base([
@@ -330,11 +357,12 @@ test('retirerStickerDuPack : l\'actif encore référencé reste, l\'orphelin par
     PACK_OK,
     [/SELECT id FROM sticker WHERE id = \? AND pack_id/, () => [[{ id: 500 }], []]],
     [/SELECT DISTINCT asset_id/, () => [[{ asset_id: 100 }], []]],
-    [/SELECT a\.id, a\.storage_key/, () => [[{ id: 100, storage_key: 'stickers/u/7/k.webp', thumb_key: null }], []]],
+    [/SELECT a\.id FROM sticker_asset a/, () => [[{ id: 100, storage_key: 'stickers/u/7/k.webp', thumb_key: null }], []]],
   ]);
   r = await pack.retirerStickerDuPack(7, 3, 500, d);
   assert.deepStrictEqual(r, { packId: 3, assets: 1 });
-  assert.deepStrictEqual(stockage.retires, ['stickers/u/7/k.webp']);
+  assert.ok(ecrit(d, /DELETE FROM sticker_asset WHERE id IN/), 'ligne de l\'orphelin supprimée');
+  assert.deepStrictEqual(stockage.retires, [], 'fichier conservé');
 });
 
 // ── 6. Partage ──────────────────────────────────────────────────────────────

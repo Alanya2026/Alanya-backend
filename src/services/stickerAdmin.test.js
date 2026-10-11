@@ -37,7 +37,8 @@ function db(handlers) {
   remplace('./stickerAssetService', {
     creerStickerOfficiel: async ({ position }) => ({ stickerId: 1000 + position, reutilise: false, bytes: 4096 }),
   });
-  remplace('./mediaStorage', { publicUrl: (k) => (k ? `https://cdn.test/${k}` : null), removeAllVersions: async () => {} });
+  const retraits = [];
+  remplace('./mediaStorage', { publicUrl: (k) => (k ? `https://cdn.test/${k}` : null), removeAllVersions: async (k) => { retraits.push(k); } });
   remplace('./stickerSettingsService', {
     getStickerSettings: async () => ({ id: 1, enabled: 0, creation_enabled: 0, animated_enabled: 0 }),
     invalidateStickerSettings: () => {},
@@ -125,6 +126,19 @@ function db(handlers) {
   test('deleteSticker refuse un pack publié', async () => {
     const d = db([[STICKER_PACK_RE, () => [[{ id: 9, pack_id: 1, asset_id: 3, status: 2 }], []]]]);
     await attendErreur(() => admin.deleteSticker(9, d), 'STICKER_PACK_PUBLISHED');
+  });
+
+  test('deleteSticker (brouillon) : lignes supprimées, AUCUN fichier effacé (A13)', async () => {
+    retraits.length = 0;
+    const d = db([
+      [STICKER_PACK_RE, () => [[{ id: 9, pack_id: 1, asset_id: 3, status: 0 }], []]],
+      [/SELECT COUNT\(\*\) AS n FROM sticker WHERE asset_id/i, () => [[{ n: 0 }], []]],
+    ]);
+    await admin.deleteSticker(9, d);
+    assert.ok(d.requetes.some(([s]) => /DELETE FROM sticker WHERE id/i.test(s)));
+    assert.ok(d.requetes.some(([s]) => /DELETE FROM sticker_asset WHERE id/i.test(s)), 'ligne d\'actif orphelin supprimée');
+    assert.deepStrictEqual(retraits, [], 'aucun fichier supprimé');
+    assert.ok(!d.requetes.some(([s]) => /storage_key/i.test(s)), 'les clés de fichier ne sont même pas lues');
   });
 
   test('addStickers refuse au-delà de 40 par pack', async () => {

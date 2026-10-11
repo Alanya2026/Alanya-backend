@@ -144,8 +144,13 @@ const ligne = { id: 1, code: 'alanya', name_i18n: { fr: 'Alanya' }, description_
       r = await appel('GET', '/packs/royal');
       assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_PACK_UNAVAILABLE'], `statut ${status} non installé`);
     }
+    // Pack officiel archivé = « indisponible » (A14), installé ou non : 404 uniforme.
     reinit({ packParCode: { ...PACK_BASE, status: 2, installed: 1 }, stickers: [] });
-    assert.strictEqual((await appel('GET', '/packs/royal')).status, 200, 'archivé mais installé : visible');
+    r = await appel('GET', '/packs/royal');
+    assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_PACK_UNAVAILABLE'], 'archivé MÊME installé : indisponible');
+    // Republié (status 1) : redevient lisible.
+    reinit({ packParCode: { ...PACK_BASE, status: 1, installed: 1 }, stickers: [] });
+    assert.strictEqual((await appel('GET', '/packs/royal')).status, 200, 'republié : disponible');
     reinit({ packParCode: { ...PACK_BASE, name_i18n: { fr: 'Royal' } }, stickers: [{ id: 71, position: 0, emoji: '👑', name_i18n: { fr: 'Le roi' }, storage_key: 'official/stickers/royal/71_9f8e7d6c.webp', thumb_key: null, width: 512, height: 512, bytes: 24500, animated: 0 }] });
     r = await appel('GET', '/packs/royal');
     assert.strictEqual(r.corps.stickers[0].name, 'Le roi');
@@ -187,9 +192,20 @@ const ligne = { id: 1, code: 'alanya', name_i18n: { fr: 'Alanya' }, description_
     assert.strictEqual((await appel('PUT', '/me/packs/6')).status, 204);
     assert.ok(!etat.appels.some((a) => a[0] === 'installerPack'));
     assert.strictEqual(emis.length, 0);
-    // Archivé installé : on peut réinstaller sans erreur ; archivé non installé : non
-    reinit({ pack: { ...PACK_BASE, is_premium: 0, status: 2, installed: 0 } });
-    assert.strictEqual((await appel('PUT', '/me/packs/6')).corps.code, 'STICKER_PACK_UNAVAILABLE');
+    // Archivé : installation refusée (A14), installé ou non, rien d'écrit ni d'émis.
+    for (const installed of [0, 1]) {
+      reinit({ pack: { ...PACK_BASE, is_premium: 0, status: 2, installed } });
+      r = await appel('PUT', '/me/packs/6');
+      assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_PACK_UNAVAILABLE'], `archivé installed=${installed}`);
+      assert.ok(!etat.appels.some((a) => a[0] === 'installerPack'), 'refusé : rien d\'écrit');
+      assert.strictEqual(emis.length, 0);
+    }
+    // Republié : s'installe de nouveau.
+    reinit({ pack: { ...PACK_BASE, is_premium: 0, status: 1, installed: 0 } });
+    assert.strictEqual((await appel('PUT', '/me/packs/6')).status, 204, 'republié : installable');
+    // Désinstaller un pack archivé reste permis (le nettoyer de son compte).
+    reinit({ pack: { ...PACK_BASE, status: 2, installed: 1 } });
+    assert.strictEqual((await appel('DELETE', '/me/packs/6')).status, 204, 'désinstaller un archivé : permis');
 
     reinit({ pack: { ...PACK_BASE, is_premium: 0 }, installes: 50 });
     r = await appel('PUT', '/me/packs/6');
@@ -221,7 +237,7 @@ const ligne = { id: 1, code: 'alanya', name_i18n: { fr: 'Alanya' }, description_
     assert.strictEqual((await appel('PUT', '/me/favorites/45')).status, 204);
     assert.ok(etat.appels.some((a) => a[0] === 'ajouterFavori'));
     assert.strictEqual(emis[0][2].reason, 'favorites');
-    reinit({ favorisable: null });
+    reinit({ favorisable: null }); // sticker d'un pack archivé ou brouillon : le store ne le rend pas
     r = await appel('PUT', '/me/favorites/45');
     assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_NOT_FOUND']);
     assert.strictEqual((await appel('PUT', '/me/favorites/0')).corps.code, 'STICKER_NOT_FOUND');

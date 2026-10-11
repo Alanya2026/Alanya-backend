@@ -117,8 +117,17 @@ const contentDe = (o) => JSON.stringify({ v: 1, pack: 'mboa', sid: 4812, emoji: 
   await refus(prepareStickerMessage({ content: contentDe({ sid: 999 }), senderID: 7 }, deps()), 'STICKER_NOT_FOUND', 'inconnu');
   await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { asset_status: 1 } })), 'STICKER_NOT_FOUND', 'fichier retiré');
   await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'brouillon');
-  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, installed: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'archivé non installé');
-  await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, installed: 1 } }));
+  // Pack officiel archivé = « indisponible » (A14) : plus d'envoi, installé ou non.
+  const e404 = await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, installed: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'archivé non installé');
+  assert.strictEqual(e404.status, 404);
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, installed: 1 } })), 'STICKER_PACK_UNAVAILABLE', 'archivé MÊME installé (remplace la décision 9)');
+  // Republié (status 1) : redevient envoyable, installé ou non.
+  await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 1, installed: 1 } }));
+  await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 1, installed: 0 } }));
+  // Archivé + fichier retiré : le fichier retiré passe d'abord (STICKER_NOT_FOUND), jamais d'écriture.
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, asset_status: 1 } })), 'STICKER_NOT_FOUND', 'archivé et fichier retiré');
+  // Via le point d'entrée commun (socket ET HTTP) : même refus.
+  await refus(resolveStickerFields({ type: 10, content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 2, installed: 1 } })), 'STICKER_PACK_UNAVAILABLE', 'resolveStickerFields : archivé installé');
   // Pack perso : le propriétaire oui, les autres non.
   await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 1, owner_id: 7 } }));
   await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 1, owner_id: 9 } })), 'STICKER_PACK_UNAVAILABLE', 'pack perso d\'un autre');

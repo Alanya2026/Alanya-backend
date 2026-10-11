@@ -8,11 +8,10 @@
  * ne se réécrit pas — on l'archive.
  *
  * Aucune règle de permission ici : les routes la portent (`requirePermission`).
- * Ce module ne connaît que la base et le stockage.
+ * Ce module ne connaît que la base : il ne supprime aucun fichier (A13).
  */
 
 const pool = require('../config/db');
-const storage = require('./mediaStorage');
 const { creerStickerOfficiel } = require('./stickerAssetService');
 const { getStickerSettings, invalidateStickerSettings } = require('./stickerSettingsService');
 
@@ -322,25 +321,22 @@ async function updateSticker(stickerId, champs, db = pool) {
   }
 }
 
+/**
+ * Retire un sticker d'un pack BROUILLON. La ligne d'actif orpheline est supprimée ;
+ * AUCUN FICHIER ne l'est (A13, décision du propriétaire 11/10/2026) : l'image et
+ * la vignette restent dans le stockage et servies par leur URL.
+ */
 async function deleteSticker(stickerId, db = pool) {
   const st = await _stickerEtPack(stickerId, db);
   _exigerBrouillon(st);
 
-  const [a] = await db.execute(
-    'SELECT storage_key, thumb_key FROM sticker_asset WHERE id = ?',
-    [st.asset_id],
-  );
   await db.execute('DELETE FROM sticker WHERE id = ?', [stickerId]);
   await db.execute('UPDATE sticker_pack SET cover_sticker_id = NULL WHERE cover_sticker_id = ?', [stickerId]);
 
-  // Actif orphelin : plus aucun sticker ne le référence → ligne et fichiers.
+  // Actif orphelin : plus aucun sticker ne le référence → la ligne seulement.
   const [usage] = await db.execute('SELECT COUNT(*) AS n FROM sticker WHERE asset_id = ?', [st.asset_id]);
   if ((Number(usage[0].n) || 0) === 0) {
     await db.execute('DELETE FROM sticker_asset WHERE id = ?', [st.asset_id]);
-    if (a[0]) {
-      await storage.removeAllVersions(a[0].storage_key).catch(() => {});
-      if (a[0].thumb_key) await storage.removeAllVersions(a[0].thumb_key).catch(() => {});
-    }
   }
 }
 
@@ -446,6 +442,12 @@ async function listReports(db = pool) {
   return rows;
 }
 
+/**
+ * Retrait admin d'un actif : `status = 1` + empreinte en liste de blocage, rien
+ * d'autre. AUCUN FICHIER N'EST EFFACÉ, c'est voulu (décision du propriétaire,
+ * 11/10/2026) : l'historique de modération est conservé et le fichier reste
+ * joignable par son URL (messages déjà envoyés compris).
+ */
 async function takedownAsset(assetId, { by } = {}, db = pool) {
   const [rows] = await db.execute('SELECT id, sha256 FROM sticker_asset WHERE id = ? LIMIT 1', [assetId]);
   if (!rows.length) throw refus('STICKER_NOT_FOUND', 'Actif introuvable', 404);

@@ -8,10 +8,12 @@
  *     `WHERE id = ? AND owner_id = <JWT>` ; le pack d'un autre est « introuvable »
  *     (`STICKER_PACK_UNAVAILABLE` 404), jamais « interdit » — pas d'oracle ;
  *   - archiver (`DELETE /packs/:id`) : le pack passe à `status = 2`, perd son
- *     lien de partage, et ses stickers suivent la règle de suppression du plan §4
- *     (le sticker quitte le pack ; le fichier n'est supprimé que si plus aucun
- *     sticker du propriétaire ne le référence). Les anciens messages affichent
- *     « Sticker retiré » ;
+ *     lien de partage, et ses stickers quittent le pack (une ligne d'actif que
+ *     plus aucun sticker du propriétaire ne référence est supprimée). AUCUN
+ *     FICHIER N'EST SUPPRIMÉ (A13) : les anciens messages continuent de
+ *     s'afficher (`mediaUrl` recopiée). Cela ne vaut que pour le propriétaire :
+ *     les copies et les packs installés par d'autres comptes sont des actifs et
+ *     des packs distincts, ils restent intacts (B) ;
  *   - partage : `share_token` = 24 caractères tirés de 18 octets aléatoires, le
  *     pack passe à `visibility = 2` ; révoquer remet `visibility = 1` et efface
  *     le jeton. Résoudre un jeton inconnu, révoqué ou d'un pack archivé répond
@@ -74,7 +76,12 @@ async function enTransaction(db, fn) {
   }
 }
 
-/** Supprime des fichiers APRÈS le commit : une ligne ne pointe jamais vers un fichier absent. */
+/**
+ * Nettoie des fichiers JAMAIS RÉFÉRENCÉS : ceux posés par une installation de
+ * lien annulée (rollback), dont aucune ligne ne survit. C'est le seul usage :
+ * aucun fichier de sticker n'est supprimé ailleurs (décision du propriétaire,
+ * 11/10/2026, A13) — ni archivage, ni retrait d'un sticker, ni suppression.
+ */
 async function retirerFichiers(cles) {
   for (const cle of cles || []) {
     if (cle) await storage.removeAllVersions(cle).catch(() => {});
@@ -108,15 +115,15 @@ async function verrouillerPackActif(conn, alanyaID, packId) {
 
 /**
  * Règle de suppression du plan §4, appliquée à des stickers d'UN propriétaire :
- * les stickers quittent leur pack (avec favoris et couverture) ; un actif que
- * plus aucun sticker ne référence est supprimé, lignes puis fichiers.
+ * les stickers quittent leur pack (avec favoris et couverture) ; la ligne d'un
+ * actif que plus aucun sticker ne référence est supprimée. Les FICHIERS restent
+ * (A13) : le stockage garde l'image et la vignette, servies par leur URL.
  *
- * @returns {Promise<{fichiers: string[], stickers: number, assets: number}>}
- *   `fichiers` : clés à effacer APRÈS le commit.
+ * @returns {Promise<{stickers: number, assets: number}>}
  */
 async function purgerStickers(conn, alanyaID, stickerIds) {
   const ids = [...new Set(stickerIds.map(Number))];
-  if (!ids.length) return { fichiers: [], stickers: 0, assets: 0 };
+  if (!ids.length) return { stickers: 0, assets: 0 };
 
   const [lignes] = await conn.execute(
     `SELECT DISTINCT asset_id FROM sticker WHERE id IN (${marques(ids)})`,
@@ -132,13 +139,12 @@ async function purgerStickers(conn, alanyaID, stickerIds) {
   );
   await conn.execute(`DELETE FROM sticker WHERE id IN (${marques(ids)})`, ids);
 
-  const fichiers = [];
   let assets = 0;
   if (assetIds.length) {
     // Orphelins seulement, et seulement les MIENS : jamais l'actif d'un autre,
     // jamais un actif officiel, même si une ligne y renvoyait par erreur.
     const [orphelins] = await conn.execute(
-      `SELECT a.id, a.storage_key, a.thumb_key FROM sticker_asset a
+      `SELECT a.id FROM sticker_asset a
         WHERE a.id IN (${marques(assetIds)}) AND a.owner_id = ?
           AND NOT EXISTS (SELECT 1 FROM sticker s WHERE s.asset_id = a.id)
         FOR UPDATE`,
@@ -148,11 +154,10 @@ async function purgerStickers(conn, alanyaID, stickerIds) {
     if (orphIds.length) {
       await conn.execute(`DELETE FROM sticker_report WHERE asset_id IN (${marques(orphIds)})`, orphIds);
       await conn.execute(`DELETE FROM sticker_asset WHERE id IN (${marques(orphIds)})`, orphIds);
-      for (const o of orphelins) fichiers.push(o.storage_key, o.thumb_key);
       assets = orphIds.length;
     }
   }
-  return { fichiers: fichiers.filter(Boolean), stickers: ids.length, assets };
+  return { stickers: ids.length, assets };
 }
 
 /** Compte des stickers d'un pack (plafond de 40). */
@@ -239,12 +244,12 @@ async function modifierPack(alanyaID, packId, patch = {}, db = pool) {
 /**
  * Archive un pack perso (propriétaire seul). Idempotent : un pack déjà archivé
  * répond comme un succès (`deja: true`). Ses stickers sont retirés (plan §4) ;
- * les fichiers orphelins sont supprimés après le commit.
+ * aucun fichier n'est supprimé (A13).
  */
 async function archiverPack(alanyaID, packId, db = pool) {
   const r = await enTransaction(db, async (conn) => {
     const pack = await verrouillerPack(conn, alanyaID, packId);
-    if (Number(pack.status) === STATUT_ARCHIVE) return { id: Number(pack.id), deja: true, fichiers: [] };
+    if (Number(pack.status) === STATUT_ARCHIVE) return { id: Number(pack.id), deja: true };
 
     const [stk] = await conn.execute('SELECT id FROM sticker WHERE pack_id = ? FOR UPDATE', [pack.id]);
     const purge = await purgerStickers(conn, alanyaID, stk.map((s) => s.id));
@@ -256,9 +261,8 @@ async function archiverPack(alanyaID, packId, db = pool) {
       [STATUT_ARCHIVE, VISIBILITE_PRIVE, pack.id],
     );
     await conn.execute('DELETE FROM user_sticker_pack WHERE pack_id = ?', [pack.id]);
-    return { id: Number(pack.id), deja: false, stickers: purge.stickers, fichiers: purge.fichiers };
+    return { id: Number(pack.id), deja: false, stickers: purge.stickers };
   });
-  await retirerFichiers(r.fichiers);
   return { id: r.id, deja: r.deja, stickers: r.stickers || 0 };
 }
 
@@ -325,8 +329,9 @@ async function ajouterStickerAuPack(alanyaID, packId, { assetId, emoji = null, n
 }
 
 /**
- * Retire un sticker d'un pack perso (règle §4). L'actif n'est supprimé, fichiers
- * compris, que si plus aucun de mes stickers ne le référence.
+ * Retire un sticker d'un pack perso (règle §4). La ligne de l'actif n'est
+ * supprimée que si plus aucun de mes stickers ne le référence ; le fichier,
+ * lui, n'est jamais supprimé (A13).
  */
 async function retirerStickerDuPack(alanyaID, packId, stickerId, db = pool) {
   const sid = idPositif(stickerId);
@@ -339,9 +344,8 @@ async function retirerStickerDuPack(alanyaID, packId, stickerId, db = pool) {
     if (!s.length) throw introuvable();
     const purge = await purgerStickers(conn, alanyaID, [sid]);
     await incrementerVersion(conn, pack.id);
-    return { packId: Number(pack.id), assets: purge.assets, fichiers: purge.fichiers };
+    return { packId: Number(pack.id), assets: purge.assets };
   });
-  await retirerFichiers(r.fichiers);
   return { packId: r.packId, assets: r.assets };
 }
 

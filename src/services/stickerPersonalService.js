@@ -359,8 +359,17 @@ async function copierStickerPerso({ alanyaID, assetId, packId = null, emoji = nu
 
 /**
  * Supprime un actif personnel : ses stickers, ses favoris, ses signalements, sa
- * couverture éventuelle, la ligne, puis les fichiers (après le commit, pour ne
- * jamais laisser une ligne pointant vers un fichier absent).
+ * couverture éventuelle et la ligne. AUCUN FICHIER N'EST SUPPRIMÉ (décision du
+ * propriétaire, 11/10/2026, A13) : l'image et la vignette restent dans le
+ * stockage et joignables par leur URL, donc les anciens messages continuent de
+ * s'afficher (`mediaUrl` recopiée).
+ *
+ * Cette suppression ne vaut que pour LE PROPRIÉTAIRE : tout est borné à l'actif
+ * d'origine (`owner_id` = JWT dans la requête de lecture). Les copies faites par
+ * d'autres comptes (`/stickers/:id/copy`, installation d'un lien) sont d'autres
+ * actifs, avec leurs propres lignes et leurs propres fichiers : elles gardent
+ * tout. Le sticker supprimé n'est plus résolu (`STICKER_NOT_FOUND` uniforme) :
+ * ni envoyable, ni transférable, ni copiable, ni partageable.
  *
  * @returns {Promise<{assetId: number, stickers: number}>}
  */
@@ -370,7 +379,7 @@ async function supprimerAssetPerso(alanyaID, assetId, db = pool) {
   try {
     await conn.beginTransaction();
     const [a] = id ? await conn.execute(
-      'SELECT id, storage_key, thumb_key FROM sticker_asset WHERE id = ? AND owner_id = ? FOR UPDATE',
+      'SELECT id FROM sticker_asset WHERE id = ? AND owner_id = ? FOR UPDATE',
       [id, alanyaID],
     ) : [[]];
     if (!a.length) throw introuvable();
@@ -391,8 +400,6 @@ async function supprimerAssetPerso(alanyaID, assetId, db = pool) {
     await conn.execute('DELETE FROM sticker_asset WHERE id = ?', [id]);
     await conn.commit();
 
-    if (a[0].storage_key) await storage.removeAllVersions(a[0].storage_key).catch(() => {});
-    if (a[0].thumb_key) await storage.removeAllVersions(a[0].thumb_key).catch(() => {});
     return { assetId: id, stickers: ids.length };
   } catch (e) {
     await conn.rollback().catch(() => {});
@@ -446,7 +453,7 @@ async function signalerSticker({ alanyaID, assetId, reason }, db = pool) {
 //
 // Règle d'accès, UNE seule, sans exception selon le client :
 //   - l'actif doit être actif (`status = 0`) ;
-//   - pack OFFICIEL : publié ou archivé (jamais brouillon) ;
+//   - pack OFFICIEL : publié seulement (ni brouillon ni archivé : « indisponible », A14) ;
 //   - pack PERSO (privé ou lien) : publié (jamais archivé ni brouillon), et le
 //     demandeur est le propriétaire OU partage une conversation avec lui. Le
 //     sticker perso d'un compte n'a pu être reçu que de lui : le co-participant
@@ -466,7 +473,10 @@ function accesStickerRecu(ligne, alanyaID) {
   const visibilite = Number(ligne.visibility);
   const statut = Number(ligne.pack_status);
   if (visibilite === VISIBILITE_OFFICIEL) {
-    return statut === STATUT_PUBLIE || statut === STATUT_ARCHIVE;
+    // Publié seulement (A14) : un pack officiel archivé est « indisponible »,
+    // il ne se copie ni ne se signale plus. Ses anciens messages restent
+    // affichés (fichier conservé, `mediaUrl` recopiée) : cette règle n'y touche pas.
+    return statut === STATUT_PUBLIE;
   }
   if (visibilite === VISIBILITE_PRIVE || visibilite === VISIBILITE_LIEN) {
     if (statut !== STATUT_PUBLIE) return false;
@@ -518,7 +528,7 @@ async function resoudreStickerRecu(alanyaID, stickerId, db = pool) {
  * L'actif est accessible si, et seulement si, il est actif (`status = 0`) ET :
  *   - il m'appartient (`owner_id = alanyaID`) ; ou
  *   - un sticker qui le porte m'est accessible selon `accesStickerRecu` — la règle
- *     de `resoudreStickerRecu`, sans écart (pack officiel publié/archivé ; pack
+ *     de `resoudreStickerRecu`, sans écart (pack officiel publié ; pack
  *     perso publié dont je suis propriétaire ou co-participant).
  *
  * @returns {Promise<{assetId: number, proprietaire: boolean, isPremium: boolean}>}

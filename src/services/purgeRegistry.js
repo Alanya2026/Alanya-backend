@@ -48,7 +48,11 @@ const DESCRIPTORS = {
       + 'disparaît. En phase payante, un média garde la durée Alanya Plus tant '
       + "qu'une personne de sa discussion y a droit. La nuit, la purge s'arrête "
       + "sans rien supprimer si elle dépasse le seuil d'arrêt : la lancer à la main "
-      + 'vaut confirmation.',
+      + 'vaut confirmation. Exemptés, jamais purgés par âge : `official/` (médias '
+      + 'officiels, stickers officiels) et `stickers/` (stickers personnels : '
+      + 'ils ne partent que par leur suppression, celle du compte ou un retrait admin).',
+    // Déclaré, pas exécuté : la sélection ne vise que `/uploads/media/`.
+    exempte: mediaPolicy.PREFIXES_JAMAIS_PURGES,
     knobs: [{
       key: 'mediaDays',
       label: 'Rétention des médias — standard',
@@ -590,6 +594,8 @@ async function describeAll({ withStats = true, runsPerPurge = 5 } = {}) {
       ...setting,
       label: desc.label,
       description: desc.description,
+      // Préfixes de stockage que cette purge ne vise jamais (absent = aucun).
+      exempte: desc.exempte || [],
       knobs: desc.knobs.map((k) => ({
         key: k.key, label: k.label, unit: k.unit, min: k.min, max: k.max,
         defaut: k.default(), valeur: setting.options[k.key],
