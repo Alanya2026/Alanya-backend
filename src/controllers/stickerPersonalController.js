@@ -22,7 +22,7 @@ const { fail, failInternal } = require('../utils/apiError');
 /** Codes du service, tous porteurs d'un statut HTTP de contrat. */
 const repondreErreur = (res, e, contexte) => {
   if (e && typeof e.code === 'string' && Number.isInteger(e.status)) {
-    return fail(res, e.status, e.code, e.message);
+    return fail(res, e.status, e.code, e.message, e.feature ? { feature: e.feature } : undefined);
   }
   console.error(`[stickers] ${contexte}`, e);
   return failInternal(res);
@@ -90,11 +90,13 @@ async function deleteAsset(req, res) {
 /**
  * POST /api/stickers/assets/:id/copy — copie un sticker REÇU dans mon espace :
  * nouveau propriétaire, fichier copié côté stockage. Sert au « ajouter aux
- * miens » depuis une conversation.
+ * miens » depuis une conversation. Route legacy (par `assetId`, séquentiel donc
+ * devinable) : l'actif doit m'appartenir ou m'être accessible comme un sticker
+ * reçu ; sinon `404 STICKER_NOT_FOUND` uniforme.
  */
 async function postAssetCopy(req, res) {
   try {
-    const r = await persist.copierStickerPerso({
+    const r = await persist.copierAssetRecu({
       alanyaID: req.user.alanyaID,
       assetId: req.params.id,
       packId: packIdDe(req.body?.packId),
@@ -117,11 +119,12 @@ async function postAssetCopy(req, res) {
 /**
  * POST /api/stickers/report — signale un sticker via sa fiche. Idempotent pour
  * un même rapporteur et un même actif : rappeler ne crée pas de doublon.
+ * Même règle d'accès que `assets/:id/copy` (404 uniforme sinon).
  * Corps : `{ assetId, reason }` (`inapproprie|spam|droits|autre`).
  */
 async function postReport(req, res) {
   try {
-    const r = await persist.signalerSticker({
+    const r = await persist.signalerAssetRecu({
       alanyaID: req.user.alanyaID,
       assetId: req.body?.assetId,
       reason: req.body?.reason,
@@ -129,6 +132,50 @@ async function postReport(req, res) {
     return res.json({ ok: true, deja: r.deja });
   } catch (e) {
     return repondreErreur(res, e, 'postReport');
+  }
+}
+
+/**
+ * POST /api/stickers/stickers/:stickerId/copy — copie un sticker REÇU désigné
+ * par son `sid` (jamais d'`assetId` côté application). Mêmes corps et réponse
+ * que `assets/:id/copy` ; `emoji` par défaut = celui du sticker.
+ */
+async function postStickerCopy(req, res) {
+  try {
+    const r = await persist.copierStickerRecu({
+      alanyaID: req.user.alanyaID,
+      stickerId: req.params.stickerId,
+      packId: packIdDe(req.body?.packId),
+      emoji: req.body?.emoji ?? null,
+      nom: req.body?.nom ?? null,
+    });
+    syncPacks(req, req.user.alanyaID);
+    return res.status(201).json({
+      assetId: r.assetId,
+      stickerId: r.stickerId,
+      packId: r.packId,
+      reutilise: r.reutilise,
+      copie: r.copie,
+    });
+  } catch (e) {
+    return repondreErreur(res, e, 'postStickerCopy');
+  }
+}
+
+/**
+ * POST /api/stickers/stickers/:stickerId/report — signale un sticker REÇU par
+ * son `sid`. Corps : `{ reason }`. Même réponse et même idempotence que `/report`.
+ */
+async function postStickerReport(req, res) {
+  try {
+    const r = await persist.signalerStickerRecu({
+      alanyaID: req.user.alanyaID,
+      stickerId: req.params.stickerId,
+      reason: req.body?.reason,
+    });
+    return res.json({ ok: true, deja: r.deja });
+  } catch (e) {
+    return repondreErreur(res, e, 'postStickerReport');
   }
 }
 
@@ -150,5 +197,7 @@ module.exports = {
   deleteAsset,
   postAssetCopy,
   postReport,
+  postStickerCopy,
+  postStickerReport,
   postPack,
 };

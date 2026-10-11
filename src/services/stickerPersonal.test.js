@@ -350,6 +350,324 @@ test('signalerSticker : on ne se signale pas soi-même', async () => {
   await attendErreur(() => sp.signalerSticker({ alanyaID: 7, assetId: 5, reason: 'spam' }, d), 'STICKER_INVALID_PAYLOAD');
 });
 
+// ── 9. Accès par `stickerId` (sticker REÇU) ─────────────────────────────────
+
+const RESOLU_RE = /FROM sticker s\s+JOIN sticker_pack p ON p\.id = s\.pack_id\s+JOIN sticker_asset a/i;
+/** Ligne de `resoudreStickerRecu` : un sticker officiel publié et actif par défaut. */
+const ligneRecue = (extra = {}) => ({
+  id: 30, asset_id: 5, emoji: '🦩', visibility: 0, pack_status: 1, pack_owner: null,
+  is_premium: 0, asset_status: 0, partage_conv: 0, ...extra,
+});
+
+test('accesStickerRecu : officiel publié ou archivé, jamais brouillon', () => {
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 1 }), 7), true);
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 2 }), 7), true);
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ pack_status: 0 }), 7), false);
+});
+
+test('accesStickerRecu : actif retiré refusé partout', () => {
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ asset_status: 1 }), 7), false);
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ visibility: 1, pack_owner: 7, asset_status: 1 }), 7), false);
+});
+
+test('accesStickerRecu : perso = propriétaire ou co-participant, publié seulement', () => {
+  for (const visibility of [1, 2]) {
+    const perso = (extra) => ligneRecue({ visibility, pack_owner: 9, ...extra });
+    assert.strictEqual(sp.accesStickerRecu(perso({ pack_owner: 7 }), 7), true, 'propriétaire');
+    assert.strictEqual(sp.accesStickerRecu(perso({ partage_conv: 1 }), 7), true, 'co-participant');
+    assert.strictEqual(sp.accesStickerRecu(perso({ partage_conv: 0 }), 7), false, 'inconnu');
+    assert.strictEqual(sp.accesStickerRecu(perso({ pack_status: 0, partage_conv: 1 }), 7), false, 'brouillon');
+    assert.strictEqual(sp.accesStickerRecu(perso({ pack_status: 2, pack_owner: 7 }), 7), false, 'archivé');
+  }
+  assert.strictEqual(sp.accesStickerRecu(ligneRecue({ visibility: 9, pack_owner: 7 }), 7), false, 'visibilité inconnue');
+  assert.strictEqual(sp.accesStickerRecu(undefined, 7), false);
+});
+
+test('resoudreStickerRecu : identifiant invalide = 404 sans requête', async () => {
+  const d = base();
+  for (const id of [undefined, null, '', 'abc', '1 OR 1=1', -3, 0, 1.5, 1e999]) {
+    await attendErreur(() => sp.resoudreStickerRecu(7, id, d), 'STICKER_NOT_FOUND');
+  }
+  assert.strictEqual(d.requetes.length, 0);
+});
+
+test('resoudreStickerRecu : inexistant et inaccessible = même 404', async () => {
+  const inexistant = await attendErreur(
+    () => sp.resoudreStickerRecu(7, 30, base([[RESOLU_RE, () => [[], []]]])), 'STICKER_NOT_FOUND');
+  const inaccessible = await attendErreur(
+    () => sp.resoudreStickerRecu(7, 30, base([[RESOLU_RE, () => [[ligneRecue({ visibility: 1, pack_owner: 9 })], []]]])),
+    'STICKER_NOT_FOUND');
+  assert.deepStrictEqual([inexistant.status, inexistant.message], [inaccessible.status, inaccessible.message]);
+});
+
+test('resoudreStickerRecu : le demandeur vient des paramètres, jamais du corps', async () => {
+  const d = base([[RESOLU_RE, () => [[ligneRecue()], []]]]);
+  const r = await sp.resoudreStickerRecu(7, '30', d);
+  assert.deepStrictEqual(r, { stickerId: 30, assetId: 5, emoji: '🦩', isPremium: false });
+  assert.deepStrictEqual(d.requetes[0][1], [7, 30]);
+  assert.ok(/conv_participants/.test(d.requetes[0][0]), 'co-participation lue dans la même requête');
+});
+
+test('copierStickerRecu : copie le fichier source, emoji du sticker par défaut', async () => {
+  videStockage();
+  const d = base([
+    [RESOLU_RE, () => [[ligneRecue()], []]],
+    [SRC_ASSET_RE, () => [[sourceCopiable()], []]],
+    [BLOCKLIST_RE, () => [[], []]],
+    [PACK_DEFAUT_RE, () => [[{ id: 3, code: 'u_7_x' }], []]],
+    [COUNT_STICKER_RE, () => [[{ n: 0 }], []]],
+    [OWNED_SHA_RE, () => [[], []]],
+    [INSERT_ASSET_RE, () => [{ insertId: 11 }, []]],
+    [INSERT_STICKER_RE, () => [{ insertId: 21 }, []]],
+    [UPDATE_KEY_RE, () => [{ affectedRows: 1 }, []]],
+  ]);
+  const r = await sp.copierStickerRecu({ alanyaID: 7, stickerId: 30 }, d);
+  assert.deepStrictEqual(r, { assetId: 11, stickerId: 21, packId: 3, reutilise: false, copie: true });
+  assert.strictEqual(stockage.copies.length, 2);
+  assert.ok(stockage.copies.every(([, dst]) => dst.startsWith('stickers/u/7/')));
+  const ins = d.requetes.find(([q]) => INSERT_STICKER_RE.test(q));
+  assert.ok(ins[1].includes('🦩'), 'emoji source repris');
+  // Un emoji fourni l'emporte.
+  const d2 = base([
+    [RESOLU_RE, () => [[ligneRecue()], []]], [SRC_ASSET_RE, () => [[sourceCopiable()], []]],
+    [BLOCKLIST_RE, () => [[], []]], [PACK_DEFAUT_RE, () => [[{ id: 3, code: 'u_7_x' }], []]],
+    [COUNT_STICKER_RE, () => [[{ n: 0 }], []]], [OWNED_SHA_RE, () => [[{ id: 4 }], []]],
+    [INSERT_STICKER_RE, () => [{ insertId: 22 }, []]],
+  ]);
+  const r2 = await sp.copierStickerRecu({ alanyaID: 7, stickerId: 30, emoji: '⭐' }, d2);
+  assert.strictEqual(r2.reutilise, true);
+  assert.ok(d2.requetes.find(([q]) => INSERT_STICKER_RE.test(q))[1].includes('⭐'));
+});
+
+test('copierStickerRecu : sticker inaccessible = 404, aucun fichier copié', async () => {
+  videStockage();
+  const d = base([[RESOLU_RE, () => [[ligneRecue({ pack_status: 0 })], []]]]);
+  await attendErreur(() => sp.copierStickerRecu({ alanyaID: 7, stickerId: 30 }, d), 'STICKER_NOT_FOUND');
+  assert.strictEqual(stockage.copies.length, 0);
+  assert.ok(!d.requetes.some(([q]) => SRC_ASSET_RE.test(q)), 'rien lu au-delà du refus');
+});
+
+test('copierStickerRecu : pack Plus sans droit = SUBSCRIPTION_REQUIRED, droits illisibles = ouvert', async () => {
+  videStockage();
+  const handlers = () => [
+    [RESOLU_RE, () => [[ligneRecue({ is_premium: 1 })], []]],
+    [SRC_ASSET_RE, () => [[sourceCopiable()], []]],
+    [BLOCKLIST_RE, () => [[], []]],
+    [PACK_DEFAUT_RE, () => [[{ id: 3, code: 'u_7_x' }], []]],
+    [COUNT_STICKER_RE, () => [[{ n: 0 }], []]],
+    [OWNED_SHA_RE, () => [[{ id: 4 }], []]],
+    [INSERT_STICKER_RE, () => [{ insertId: 22 }, []]],
+  ];
+  const e = await attendErreur(() => sp.copierStickerRecu(
+    { alanyaID: 7, stickerId: 30 }, base(handlers()),
+    { droits: async () => ({ features: { stickers_premium: false } }) }), 'SUBSCRIPTION_REQUIRED');
+  assert.strictEqual(e.status, 403);
+  assert.strictEqual(e.feature, 'stickers_premium');
+  assert.strictEqual(stockage.copies.length, 0);
+  // Droit explicite, droits absents ou en panne : on laisse passer (règle de l'envoi).
+  for (const droits of [
+    async () => ({ features: { stickers_premium: true } }),
+    async () => null,
+    async () => { throw new Error('ER_NO_SUCH_TABLE'); },
+  ]) {
+    const r = await sp.copierStickerRecu({ alanyaID: 7, stickerId: 30 }, base(handlers()), { droits });
+    assert.strictEqual(r.reutilise, true);
+  }
+});
+
+test('signalerStickerRecu : résout l\'actif côté serveur puis signale, idempotent', async () => {
+  const h = (deja) => [
+    [RESOLU_RE, () => [[ligneRecue({ asset_id: 5 })], []]],
+    [REPORT_ASSET_RE, () => [[{ id: 5, owner_id: 9, status: 0 }], []]],
+    [REPORT_DEJA_RE, () => [deja ? [{ id: 1 }] : [], []]],
+    [INSERT_REPORT_RE, () => [{ insertId: 1 }, []]],
+  ];
+  const d = base(h(false));
+  assert.deepStrictEqual(await sp.signalerStickerRecu({ alanyaID: 7, stickerId: 30, reason: 'spam' }, d), { ok: true, deja: false });
+  assert.deepStrictEqual(d.requetes.find(([q]) => INSERT_REPORT_RE.test(q))[1], [5, 7, 1], 'asset 5, rapporteur 7, motif spam = 1');
+  const d2 = base(h(true));
+  assert.deepStrictEqual(await sp.signalerStickerRecu({ alanyaID: 7, stickerId: 30, reason: 'spam' }, d2), { ok: true, deja: true });
+  assert.ok(!d2.requetes.some(([q]) => INSERT_REPORT_RE.test(q)), 'aucun doublon');
+});
+
+test('signalerStickerRecu : l\'accès précède la validation du motif (pas d\'oracle)', async () => {
+  const d = base([[RESOLU_RE, () => [[ligneRecue({ visibility: 1, pack_owner: 9 })], []]]]);
+  await attendErreur(() => sp.signalerStickerRecu({ alanyaID: 7, stickerId: 30, reason: 'zzz' }, d), 'STICKER_NOT_FOUND');
+  const d2 = base([[RESOLU_RE, () => [[ligneRecue()], []]], [REPORT_ASSET_RE, () => [[{ id: 5, owner_id: 9, status: 0 }], []]]]);
+  await attendErreur(() => sp.signalerStickerRecu({ alanyaID: 7, stickerId: 30, reason: 'zzz' }, d2), 'STICKER_INVALID_PAYLOAD');
+});
+
+// ── 10. Routes legacy par `assetId` : même règle que le `stickerId` ─────────
+
+const ASSET_ACCES_RE = /FROM sticker_asset a\s+LEFT JOIN sticker s ON s\.asset_id = a\.id\s+LEFT JOIN sticker_pack p/i;
+/** Ligne de `resoudreAssetRecu` : actif officiel actif, porté par un sticker d'un pack publié. */
+const ligneAsset = (extra = {}) => ({
+  asset_id: 5, asset_owner: 0, asset_status: 0, sticker_id: 30,
+  visibility: 0, pack_status: 1, pack_owner: null, is_premium: 0, partage_conv: 0, ...extra,
+});
+const NOT_FOUND = 'STICKER_NOT_FOUND';
+const accesAsset = (lignes) => base([[ASSET_ACCES_RE, () => [lignes, []]]]);
+
+test('resoudreAssetRecu : propriétaire de l\'actif, même hors de tout pack', async () => {
+  const r = await sp.resoudreAssetRecu(7, 5, accesAsset([
+    ligneAsset({ asset_owner: 7, sticker_id: null, visibility: null, pack_status: null }),
+  ]));
+  assert.deepStrictEqual(r, { assetId: 5, proprietaire: true, isPremium: false });
+});
+
+test('resoudreAssetRecu : accès légitime = règle de resoudreStickerRecu', async () => {
+  // officiel publié et archivé
+  for (const pack_status of [1, 2]) {
+    const r = await sp.resoudreAssetRecu(7, '5', accesAsset([ligneAsset({ pack_status })]));
+    assert.deepStrictEqual(r, { assetId: 5, proprietaire: false, isPremium: false });
+  }
+  // perso (privé et lien) : publié + co-participant
+  for (const visibility of [1, 2]) {
+    const r = await sp.resoudreAssetRecu(7, 5, accesAsset([
+      ligneAsset({ asset_owner: 9, visibility, pack_owner: 9, partage_conv: 1 }),
+    ]));
+    assert.strictEqual(r.proprietaire, false);
+  }
+  // un seul sticker accessible parmi plusieurs suffit
+  const r = await sp.resoudreAssetRecu(7, 5, accesAsset([
+    ligneAsset({ asset_owner: 9, sticker_id: 31, visibility: 1, pack_owner: 9, partage_conv: 0 }),
+    ligneAsset({ asset_owner: 9, sticker_id: 32, visibility: 1, pack_owner: 9, partage_conv: 1 }),
+  ]));
+  assert.strictEqual(r.assetId, 5);
+});
+
+test('resoudreAssetRecu : le demandeur vient des paramètres, requête unique', async () => {
+  const d = accesAsset([ligneAsset()]);
+  await sp.resoudreAssetRecu(7, '5', d);
+  assert.strictEqual(d.requetes.length, 1);
+  assert.deepStrictEqual(d.requetes[0][1], [7, 5]);
+  assert.ok(/conv_participants/.test(d.requetes[0][0]), 'co-participation lue dans la même requête');
+});
+
+test('resoudreAssetRecu : refusés = MÊME 404 (privé d\'un autre, retiré, brouillon, archivé, inexistant, invalide)', async () => {
+  const refuses = {
+    'inexistant': [],
+    'actif retiré (officiel)': [ligneAsset({ asset_status: 1 })],
+    'actif retiré (à moi)': [ligneAsset({ asset_status: 1, asset_owner: 7 })],
+    'privé d\'un autre, sans conversation': [ligneAsset({ asset_owner: 9, visibility: 1, pack_owner: 9, partage_conv: 0 })],
+    'lien d\'un autre, sans conversation': [ligneAsset({ asset_owner: 9, visibility: 2, pack_owner: 9, partage_conv: 0 })],
+    'privé d\'un autre : pack brouillon, même co-participant': [ligneAsset({ asset_owner: 9, visibility: 1, pack_status: 0, pack_owner: 9, partage_conv: 1 })],
+    'privé d\'un autre : pack archivé, même co-participant': [ligneAsset({ asset_owner: 9, visibility: 1, pack_status: 2, pack_owner: 9, partage_conv: 1 })],
+    'officiel : pack brouillon': [ligneAsset({ pack_status: 0 })],
+    'actif orphelin d\'un autre (aucun sticker)': [ligneAsset({ asset_owner: 9, sticker_id: null, visibility: null, pack_status: null })],
+    'visibilité inconnue': [ligneAsset({ asset_owner: 9, visibility: 9, pack_owner: 9, partage_conv: 1 })],
+  };
+  const erreurs = [];
+  for (const [libelle, lignes] of Object.entries(refuses)) {
+    const e = await attendErreur(() => sp.resoudreAssetRecu(7, 5, accesAsset(lignes)), NOT_FOUND);
+    erreurs.push([libelle, e.status, e.message]);
+  }
+  for (const id of [undefined, null, '', 'abc', '1 OR 1=1', -3, 0, 1.5, 1e999]) {
+    const d = base();
+    const e = await attendErreur(() => sp.resoudreAssetRecu(7, id, d), NOT_FOUND);
+    erreurs.push([String(id), e.status, e.message]);
+    assert.strictEqual(d.requetes.length, 0, 'identifiant invalide : aucune requête');
+  }
+  const [, st, msg] = erreurs[0];
+  for (const [libelle, status, message] of erreurs) {
+    assert.deepStrictEqual([status, message], [st, msg], `réponse distincte : ${libelle}`);
+  }
+});
+
+test('copierAssetRecu : propriétaire et accès légitime copient (réponse inchangée)', async () => {
+  videStockage();
+  const handlers = (ligne) => [
+    [ASSET_ACCES_RE, () => [[ligne], []]],
+    [SRC_ASSET_RE, () => [[sourceCopiable()], []]],
+    [BLOCKLIST_RE, () => [[], []]],
+    [PACK_DEFAUT_RE, () => [[{ id: 3, code: 'u_7_x' }], []]],
+    [COUNT_STICKER_RE, () => [[{ n: 0 }], []]],
+    [OWNED_SHA_RE, () => [[], []]],
+    [INSERT_ASSET_RE, () => [{ insertId: 11 }, []]],
+    [INSERT_STICKER_RE, () => [{ insertId: 21 }, []]],
+    [UPDATE_KEY_RE, () => [{ affectedRows: 1 }, []]],
+  ];
+  for (const ligne of [
+    ligneAsset({ asset_owner: 7, sticker_id: null, visibility: null, pack_status: null }), // propriétaire
+    ligneAsset(), // officiel publié
+    ligneAsset({ asset_owner: 9, visibility: 1, pack_owner: 9, partage_conv: 1 }), // co-participant
+  ]) {
+    videStockage();
+    const r = await sp.copierAssetRecu({ alanyaID: 7, assetId: 5 }, base(handlers(ligne)));
+    assert.deepStrictEqual(r, { assetId: 11, stickerId: 21, packId: 3, reutilise: false, copie: true });
+    assert.strictEqual(stockage.copies.length, 2);
+  }
+});
+
+test('copierAssetRecu : actif inaccessible = 404 AVANT toute lecture de la source ou copie', async () => {
+  videStockage();
+  for (const lignes of [
+    [], // inexistant
+    [ligneAsset({ asset_owner: 9, visibility: 1, pack_owner: 9, partage_conv: 0 })], // privé d'un autre
+    [ligneAsset({ asset_owner: 9, visibility: 1, pack_owner: 9, pack_status: 0, partage_conv: 1 })], // brouillon
+    [ligneAsset({ asset_status: 1 })], // retiré
+  ]) {
+    const d = accesAsset(lignes);
+    await attendErreur(() => sp.copierAssetRecu({ alanyaID: 7, assetId: 5 }, d), NOT_FOUND);
+    assert.strictEqual(stockage.copies.length, 0);
+    assert.ok(!d.requetes.some(([q]) => SRC_ASSET_RE.test(q) || INSERT_ASSET_RE.test(q)), 'rien lu ni écrit au-delà du refus');
+  }
+});
+
+test('copierAssetRecu : pack Plus sans droit = SUBSCRIPTION_REQUIRED, mon propre actif jamais', async () => {
+  videStockage();
+  const handlers = (ligne) => [
+    [ASSET_ACCES_RE, () => [[ligne], []]],
+    [SRC_ASSET_RE, () => [[sourceCopiable()], []]],
+    [BLOCKLIST_RE, () => [[], []]],
+    [PACK_DEFAUT_RE, () => [[{ id: 3, code: 'u_7_x' }], []]],
+    [COUNT_STICKER_RE, () => [[{ n: 0 }], []]],
+    [OWNED_SHA_RE, () => [[{ id: 4 }], []]],
+    [INSERT_STICKER_RE, () => [{ insertId: 22 }, []]],
+  ];
+  const non = { droits: async () => ({ features: { stickers_premium: false } }) };
+  const e = await attendErreur(() => sp.copierAssetRecu(
+    { alanyaID: 7, assetId: 5 }, base(handlers(ligneAsset({ is_premium: 1 }))), non), 'SUBSCRIPTION_REQUIRED');
+  assert.deepStrictEqual([e.status, e.feature], [403, 'stickers_premium']);
+  // Mon propre actif : aucun contrôle de droits.
+  const r = await sp.copierAssetRecu({ alanyaID: 7, assetId: 5 },
+    base(handlers(ligneAsset({ asset_owner: 7, is_premium: 1 }))), non);
+  assert.strictEqual(r.reutilise, true);
+  // Droits illisibles ou « oui » : ouvert.
+  for (const droits of [async () => null, async () => { throw new Error('x'); }]) {
+    const r2 = await sp.copierAssetRecu({ alanyaID: 7, assetId: 5 }, base(handlers(ligneAsset({ is_premium: 1 }))), { droits });
+    assert.strictEqual(r2.reutilise, true);
+  }
+});
+
+test('signalerAssetRecu : accès légitime signale, idempotent ; l\'accès précède le motif', async () => {
+  const h = (ligne, deja) => [
+    [ASSET_ACCES_RE, () => [[ligne], []]],
+    [REPORT_ASSET_RE, () => [[{ id: 5, owner_id: ligne.asset_owner, status: 0 }], []]],
+    [REPORT_DEJA_RE, () => [deja ? [{ id: 1 }] : [], []]],
+    [INSERT_REPORT_RE, () => [{ insertId: 1 }, []]],
+  ];
+  const d = base(h(ligneAsset({ asset_owner: 9, visibility: 1, pack_owner: 9, partage_conv: 1 }), false));
+  assert.deepStrictEqual(await sp.signalerAssetRecu({ alanyaID: 7, assetId: 5, reason: 'spam' }, d), { ok: true, deja: false });
+  assert.deepStrictEqual(d.requetes.find(([q]) => INSERT_REPORT_RE.test(q))[1], [5, 7, 1]);
+  const d2 = base(h(ligneAsset(), true));
+  assert.deepStrictEqual(await sp.signalerAssetRecu({ alanyaID: 7, assetId: 5, reason: 'spam' }, d2), { ok: true, deja: true });
+  assert.ok(!d2.requetes.some(([q]) => INSERT_REPORT_RE.test(q)), 'aucun doublon');
+  // Actif d'un autre compte (privé) : 404 même avec un motif invalide ; rien n'est écrit.
+  for (const reason of ['spam', 'zzz', undefined]) {
+    const d3 = base(h(ligneAsset({ asset_owner: 9, visibility: 1, pack_owner: 9, partage_conv: 0 }), false));
+    await attendErreur(() => sp.signalerAssetRecu({ alanyaID: 7, assetId: 5, reason }, d3), NOT_FOUND);
+    assert.ok(!d3.requetes.some(([q]) => INSERT_REPORT_RE.test(q) || REPORT_ASSET_RE.test(q)), 'rien écrit ni lu au-delà');
+  }
+  // Inexistant et retiré : même 404.
+  await attendErreur(() => sp.signalerAssetRecu({ alanyaID: 7, assetId: 5, reason: 'spam' }, accesAsset([])), NOT_FOUND);
+  await attendErreur(() => sp.signalerAssetRecu({ alanyaID: 7, assetId: 5, reason: 'spam' },
+    accesAsset([ligneAsset({ asset_status: 1 })])), NOT_FOUND);
+  // Mon propre actif : accès accordé, puis refus habituel de se signaler soi-même.
+  await attendErreur(() => sp.signalerAssetRecu({ alanyaID: 7, assetId: 5, reason: 'spam' },
+    base(h(ligneAsset({ asset_owner: 7 }), false))), 'STICKER_INVALID_PAYLOAD');
+});
+
 // ── Exécution ───────────────────────────────────────────────────────────────
 
 (async () => {

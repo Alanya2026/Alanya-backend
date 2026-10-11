@@ -460,6 +460,30 @@ async function resoudrePartage(alanyaID, token, db = pool) {
 }
 
 /**
+ * Aperçu PUBLIC d'un lien (page `GET /s/:token`, sans compte) : le nom i18n et
+ * le nombre de stickers actifs, RIEN d'autre — ni identifiant de compte, ni
+ * fichier, ni code de pack. Jeton mal formé, inconnu, révoqué, pack archivé ou
+ * sans sticker actif : même `null`.
+ *
+ * @returns {Promise<{nameI18n: *, count: number}|null>}
+ */
+async function apercuPartagePublic(token, db = pool) {
+  if (!jetonValide(token)) return null;
+  const [rows] = await db.execute(
+    `SELECT p.name_i18n,
+            (SELECT COUNT(*) FROM sticker s JOIN sticker_asset a ON a.id = s.asset_id
+              WHERE s.pack_id = p.id AND a.status = 0) AS count
+       FROM sticker_pack p
+      WHERE p.share_token = ? AND p.visibility = ? AND p.status = ?
+      LIMIT 1`,
+    [token, VISIBILITE_LIEN, STATUT_PUBLIE],
+  );
+  const r = rows[0];
+  if (!r || !Number(r.count)) return null;
+  return { nameI18n: r.name_i18n, count: Number(r.count) };
+}
+
+/**
  * Installe un pack partagé chez moi : COPIE (plan §4). Voir l'en-tête du module.
  *
  * @returns {Promise<{packId: number, code?: string, deja: boolean, mine?: boolean,
@@ -640,5 +664,6 @@ module.exports = {
   partagerPack,
   revoquerPartage,
   resoudrePartage,
+  apercuPartagePublic,
   ajouterPackPartage,
 };

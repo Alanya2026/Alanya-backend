@@ -113,6 +113,22 @@ router.post('/report', requireStickerCreation, perso.postReport);
 
 /**
  * @swagger
+ * /api/stickers/stickers/{stickerId}/copy:
+ *   post:
+ *     summary: Copie un sticker reçu (par son sid) dans mon espace
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ * /api/stickers/stickers/{stickerId}/report:
+ *   post:
+ *     summary: Signale un sticker reçu (par son sid), idempotent
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.post('/stickers/:stickerId/copy', requireStickerCreation, perso.postStickerCopy);
+router.post('/stickers/:stickerId/report', requireStickerCreation, perso.postStickerReport);
+
+/**
+ * @swagger
  * /api/stickers/packs:
  *   post:
  *     summary: Crée un pack perso privé (V1b)

@@ -436,6 +436,195 @@ async function signalerSticker({ alanyaID, assetId, reason }, db = pool) {
   return { ok: true, deja: false };
 }
 
+// ── Accès par `stickerId` (sticker REÇU) ────────────────────────────────────
+//
+// Un sticker reçu (message type 10) n'expose à l'application que son `sid`
+// (`sticker.id`), jamais l'`assetId` : la copie et le signalement sont donc aussi
+// offerts par `stickerId`, l'actif étant résolu côté serveur. Les routes
+// `assets/:id/copy` et `/report` (par `assetId`, compat) appliquent la MÊME règle
+// via `resoudreAssetRecu` : l'identifiant d'actif est séquentiel, donc devinable.
+//
+// Règle d'accès, UNE seule, sans exception selon le client :
+//   - l'actif doit être actif (`status = 0`) ;
+//   - pack OFFICIEL : publié ou archivé (jamais brouillon) ;
+//   - pack PERSO (privé ou lien) : publié (jamais archivé ni brouillon), et le
+//     demandeur est le propriétaire OU partage une conversation avec lui. Le
+//     sticker perso d'un compte n'a pu être reçu que de lui : le co-participant
+//     est le seul destinataire légitime (le serveur ne relit pas les messages :
+//     tables partitionnées, contenu chiffré en E2EE). Un identifiant deviné par
+//     un inconnu ne donne donc rien.
+// Tout refus est le MÊME `404 STICKER_NOT_FOUND` : inexistant, retiré, brouillon,
+// pack d'un inconnu — aucun oracle d'existence.
+
+const FEATURE_PREMIUM = 'stickers_premium';
+const VISIBILITE_OFFICIEL = 0;
+const STATUT_BROUILLON = 0;
+
+/** Le demandeur peut-il voir ce sticker ? `ligne` : résultat de `chargerStickerRecu`. */
+function accesStickerRecu(ligne, alanyaID) {
+  if (!ligne || Number(ligne.asset_status) !== 0) return false;
+  const visibilite = Number(ligne.visibility);
+  const statut = Number(ligne.pack_status);
+  if (visibilite === VISIBILITE_OFFICIEL) {
+    return statut === STATUT_PUBLIE || statut === STATUT_ARCHIVE;
+  }
+  if (visibilite === VISIBILITE_PRIVE || visibilite === VISIBILITE_LIEN) {
+    if (statut !== STATUT_PUBLIE) return false;
+    if (Number(ligne.pack_owner) === Number(alanyaID)) return true;
+    return Number(ligne.partage_conv) === 1;
+  }
+  return false;
+}
+
+/**
+ * Résout un `stickerId` en sticker accessible au demandeur, ou lève
+ * `STICKER_NOT_FOUND` (404 uniforme).
+ *
+ * @returns {Promise<{stickerId: number, assetId: number, emoji: string,
+ *   isPremium: boolean}>}
+ */
+async function resoudreStickerRecu(alanyaID, stickerId, db = pool) {
+  const id = idPositif(stickerId);
+  if (!id) throw introuvable();
+  const [rows] = await db.execute(
+    `SELECT s.id, s.asset_id, s.emoji,
+            p.visibility, p.status AS pack_status, p.owner_id AS pack_owner, p.is_premium,
+            a.status AS asset_status,
+            EXISTS(SELECT 1 FROM conv_participants moi
+                     JOIN conv_participants lui ON lui.conversID = moi.conversID
+                    WHERE moi.alanyaID = ? AND lui.alanyaID = p.owner_id) AS partage_conv
+       FROM sticker s
+       JOIN sticker_pack p ON p.id = s.pack_id
+       JOIN sticker_asset a ON a.id = s.asset_id
+      WHERE s.id = ?
+      LIMIT 1`,
+    [alanyaID, id],
+  );
+  const ligne = rows[0];
+  if (!accesStickerRecu(ligne, alanyaID)) throw introuvable();
+  return {
+    stickerId: Number(ligne.id),
+    assetId: Number(ligne.asset_id),
+    emoji: ligne.emoji,
+    isPremium: Number(ligne.is_premium) === 1,
+  };
+}
+
+/**
+ * Résout un `assetId` (routes legacy `assets/:id/copy` et `/report`) en actif
+ * accessible au demandeur, ou lève `STICKER_NOT_FOUND` (404 uniforme : même
+ * réponse qu'un actif inexistant, retiré, brouillon ou d'un inconnu).
+ *
+ * L'actif est accessible si, et seulement si, il est actif (`status = 0`) ET :
+ *   - il m'appartient (`owner_id = alanyaID`) ; ou
+ *   - un sticker qui le porte m'est accessible selon `accesStickerRecu` — la règle
+ *     de `resoudreStickerRecu`, sans écart (pack officiel publié/archivé ; pack
+ *     perso publié dont je suis propriétaire ou co-participant).
+ *
+ * @returns {Promise<{assetId: number, proprietaire: boolean, isPremium: boolean}>}
+ *   `isPremium` : vrai si TOUS les stickers accessibles qui portent l'actif sont
+ *   d'un pack Plus (jamais pour mon propre actif).
+ */
+async function resoudreAssetRecu(alanyaID, assetId, db = pool) {
+  const id = idPositif(assetId);
+  if (!id) throw introuvable();
+  const [rows] = await db.execute(
+    `SELECT a.id AS asset_id, a.owner_id AS asset_owner, a.status AS asset_status,
+            s.id AS sticker_id,
+            p.visibility, p.status AS pack_status, p.owner_id AS pack_owner, p.is_premium,
+            EXISTS(SELECT 1 FROM conv_participants moi
+                     JOIN conv_participants lui ON lui.conversID = moi.conversID
+                    WHERE moi.alanyaID = ? AND lui.alanyaID = p.owner_id) AS partage_conv
+       FROM sticker_asset a
+       LEFT JOIN sticker s ON s.asset_id = a.id
+       LEFT JOIN sticker_pack p ON p.id = s.pack_id
+      WHERE a.id = ?`,
+    [alanyaID, id],
+  );
+  const lignes = Array.isArray(rows) ? rows : [];
+  const actif = lignes.length > 0 && Number(lignes[0].asset_status) === 0;
+  if (!actif) throw introuvable();
+  if (Number(alanyaID) !== 0 && Number(lignes[0].asset_owner) === Number(alanyaID)) {
+    return { assetId: id, proprietaire: true, isPremium: false };
+  }
+  // `LEFT JOIN` : un actif sans sticker donne une ligne sans `sticker_id`, qui ne
+  // doit JAMAIS être lue comme un pack officiel (`visibility` nul vaut 0).
+  const accessibles = lignes.filter((l) => l.sticker_id != null && accesStickerRecu(l, alanyaID));
+  if (!accessibles.length) throw introuvable();
+  return {
+    assetId: id,
+    proprietaire: false,
+    isPremium: accessibles.every((l) => Number(l.is_premium) === 1),
+  };
+}
+
+/** Droits par défaut : lus à l'usage (le module de facturation est lourd). */
+const droitsParDefaut = (alanyaID) => require('./billing/entitlements').entitlementsOrNull(alanyaID);
+
+/**
+ * Pack Plus : refus seulement sur un « non » explicite des droits (droits
+ * illisibles = ouvert, comme à l'envoi).
+ */
+async function verifierDroitPremium(alanyaID, deps = {}) {
+  let droits = null;
+  try {
+    droits = await (deps.droits || droitsParDefaut)(alanyaID);
+  } catch (_) {
+    droits = null;
+  }
+  if (droits && droits.features && droits.features[FEATURE_PREMIUM] === false) {
+    throw refus('SUBSCRIPTION_REQUIRED', 'Pack réservé à Alanya Plus', 403, { feature: FEATURE_PREMIUM });
+  }
+}
+
+/**
+ * Copie un sticker REÇU désigné par son `stickerId` (sticker officiel compris :
+ * plan §4, « Ajouter à mon pack » copie le fichier). Même effet, mêmes quotas,
+ * même réponse que `copierStickerPerso`. Deux garde-fous en plus :
+ *   - l'accès (`resoudreStickerRecu`) ;
+ *   - un sticker d'un pack Plus ne se copie pas sans le droit, comme il ne
+ *     s'envoie pas : seul un « non » explicite des droits ferme (droits
+ *     illisibles = ouvert, comme à l'envoi).
+ * Sans `emoji` fourni, celui du sticker source est repris.
+ */
+async function copierStickerRecu({ alanyaID, stickerId, packId = null, emoji = null, nom = null }, db = pool, deps = {}) {
+  const src = await resoudreStickerRecu(alanyaID, stickerId, db);
+  if (src.isPremium) await verifierDroitPremium(alanyaID, deps);
+  return copierStickerPerso({
+    alanyaID,
+    assetId: src.assetId,
+    packId,
+    emoji: String(emoji ?? '').trim() ? emoji : src.emoji,
+    nom,
+  }, db);
+}
+
+/**
+ * Copie un actif désigné par son `assetId` (route legacy `assets/:id/copy`) : même
+ * règle d'accès que `copierStickerRecu` (`resoudreAssetRecu`), même contrôle Plus,
+ * même effet et même réponse que `copierStickerPerso`. L'accès précède tout le reste.
+ */
+async function copierAssetRecu({ alanyaID, assetId, packId = null, emoji = null, nom = null }, db = pool, deps = {}) {
+  const src = await resoudreAssetRecu(alanyaID, assetId, db);
+  if (src.isPremium) await verifierDroitPremium(alanyaID, deps);
+  return copierStickerPerso({ alanyaID, assetId: src.assetId, packId, emoji, nom }, db);
+}
+
+/**
+ * Signale un actif désigné par son `assetId` (route legacy `/report`). L'accès
+ * (`resoudreAssetRecu`) précède la validation du motif : pas d'oracle d'existence.
+ */
+async function signalerAssetRecu({ alanyaID, assetId, reason }, db = pool) {
+  const src = await resoudreAssetRecu(alanyaID, assetId, db);
+  return signalerSticker({ alanyaID, assetId: src.assetId, reason }, db);
+}
+
+/** Signale un sticker REÇU désigné par son `stickerId`. Même effet que `signalerSticker`. */
+async function signalerStickerRecu({ alanyaID, stickerId, reason }, db = pool) {
+  const src = await resoudreStickerRecu(alanyaID, stickerId, db);
+  return signalerSticker({ alanyaID, assetId: src.assetId, reason }, db);
+}
+
 module.exports = {
   MAX_PACKS_PERSO,
   MAX_STICKERS_PACK,
@@ -461,4 +650,11 @@ module.exports = {
   copierStickerPerso,
   supprimerAssetPerso,
   signalerSticker,
+  accesStickerRecu,
+  resoudreStickerRecu,
+  resoudreAssetRecu,
+  copierStickerRecu,
+  signalerStickerRecu,
+  copierAssetRecu,
+  signalerAssetRecu,
 };

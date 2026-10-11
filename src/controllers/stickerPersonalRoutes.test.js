@@ -37,14 +37,18 @@ const via = (nom) => async (...a) => {
 const service = {
   creerStickerPerso: via('creerStickerPerso'),
   supprimerAssetPerso: via('supprimerAssetPerso'),
-  copierStickerPerso: via('copierStickerPerso'),
-  signalerSticker: via('signalerSticker'),
+  copierAssetRecu: via('copierAssetRecu'),
+  signalerAssetRecu: via('signalerAssetRecu'),
+  copierStickerRecu: via('copierStickerRecu'),
+  signalerStickerRecu: via('signalerStickerRecu'),
   creerPackPerso: via('creerPackPerso'),
 };
 const RETOURS = Object.freeze({
   creerStickerPerso: { assetId: 10, stickerId: 20, packId: 3, reutilise: false, bytes: 4023 },
-  copierStickerPerso: { assetId: 11, stickerId: 21, packId: 3, reutilise: false, copie: true },
-  signalerSticker: { ok: true, deja: false },
+  copierAssetRecu: { assetId: 11, stickerId: 21, packId: 3, reutilise: false, copie: true },
+  signalerAssetRecu: { ok: true, deja: false },
+  copierStickerRecu: { assetId: 12, stickerId: 22, packId: 3, reutilise: false, copie: true },
+  signalerStickerRecu: { ok: true, deja: true },
   creerPackPerso: { id: 4, code: 'u_7_ab12cd34' },
   supprimerAssetPerso: { assetId: 10, stickers: 2 },
 });
@@ -108,6 +112,7 @@ const appelDe = (nom, i = 0) => etat.appel.filter(([n]) => n === nom)[i][1];
       for (const [m, c] of [
         ['POST', '/assets'], ['DELETE', '/assets/1'], ['POST', '/assets/1/copy'],
         ['POST', '/report'], ['POST', '/packs'],
+        ['POST', '/stickers/30/copy'], ['POST', '/stickers/30/report'],
       ]) {
         const r = await appel(m, c, m === 'POST' && c === '/assets' ? { corps: {} } : undefined);
         assert.strictEqual(r.status, 404, `${libelle} ${m} ${c}`);
@@ -172,10 +177,20 @@ const appelDe = (nom, i = 0) => etat.appel.filter(([n]) => n === nom)[i][1];
     r = await appel('POST', '/assets/55/copy', { corps: { packId: 3, emoji: '🦩' } });
     assert.strictEqual(r.status, 201);
     assert.deepStrictEqual(r.corps, { assetId: 11, stickerId: 21, packId: 3, reutilise: false, copie: true });
-    const [copie] = appelDe('copierStickerPerso');
+    const [copie] = appelDe('copierAssetRecu');
     assert.strictEqual(copie.alanyaID, 7);
     assert.strictEqual(copie.assetId, '55');
     assert.strictEqual(copie.packId, 3);
+    // Actif d'un autre compte / retiré / brouillon / inexistant : 404 uniforme, rien n'est synchronisé
+    reinit({ erreur: ['STICKER_NOT_FOUND', 404] });
+    r = await appel('POST', '/assets/56/copy', { corps: {} });
+    assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_NOT_FOUND']);
+    assert.strictEqual(emis.length, 0);
+    // Identifiant du corps ignoré : seul `:id` désigne l'actif, le demandeur vient du JWT
+    reinit();
+    await appel('POST', '/assets/55/copy', { corps: { assetId: 999, alanyaID: 1 }, entetes: { 'x-test-user': '8' } });
+    assert.deepStrictEqual(
+      [appelDe('copierAssetRecu')[0].alanyaID, appelDe('copierAssetRecu')[0].assetId], [8, '55']);
     // Image bloquée : 422
     reinit({ erreur: ['STICKER_ASSET_BLOCKED', 422] });
     r = await appel('POST', '/assets/55/copy', { corps: {} });
@@ -185,14 +200,81 @@ const appelDe = (nom, i = 0) => etat.appel.filter(([n]) => n === nom)[i][1];
     reinit();
     r = await appel('POST', '/report', { corps: { assetId: 9, reason: 'spam' } });
     assert.deepStrictEqual([r.status, r.corps], [200, { ok: true, deja: false }]);
-    const [signal] = appelDe('signalerSticker');
+    const [signal] = appelDe('signalerAssetRecu');
     assert.strictEqual(signal.alanyaID, 7);
     assert.strictEqual(signal.assetId, 9);
     assert.strictEqual(signal.reason, 'spam');
+    // Actif inaccessible / inexistant : même 404 que la copie
+    reinit({ erreur: ['STICKER_NOT_FOUND', 404] });
+    r = await appel('POST', '/report', { corps: { assetId: 9, reason: 'spam' } });
+    assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_NOT_FOUND']);
+    // Pack Plus sans droit : 403 conservé sur la copie legacy
+    reinit();
+    service.copierAssetRecu = async () => {
+      throw Object.assign(new Error('Pack réservé à Alanya Plus'),
+        { code: 'SUBSCRIPTION_REQUIRED', status: 403, feature: 'stickers_premium' });
+    };
+    r = await appel('POST', '/assets/55/copy', { corps: {} });
+    assert.deepStrictEqual([r.status, r.corps.code, r.corps.feature], [403, 'SUBSCRIPTION_REQUIRED', 'stickers_premium']);
+    service.copierAssetRecu = via('copierAssetRecu');
     // Motif inconnu : 400 explicite
     reinit({ erreur: ['STICKER_INVALID_PAYLOAD', 400] });
     r = await appel('POST', '/report', { corps: { assetId: 9, reason: 'zzz' } });
     assert.deepStrictEqual([r.status, r.corps.code], [400, 'STICKER_INVALID_PAYLOAD']);
+
+    // ── POST /stickers/:stickerId/copy (sticker reçu, par son sid) ─────────
+    reinit();
+    r = await appel('POST', '/stickers/30/copy', { corps: { packId: 3, emoji: '🦩', nom: 'Flamant', assetId: 999 } });
+    assert.strictEqual(r.status, 201);
+    assert.deepStrictEqual(r.corps, { assetId: 12, stickerId: 22, packId: 3, reutilise: false, copie: true });
+    const [recu] = appelDe('copierStickerRecu');
+    assert.deepStrictEqual(
+      [recu.alanyaID, recu.stickerId, recu.packId, recu.emoji, recu.nom], [7, '30', 3, '🦩', 'Flamant']);
+    assert.ok(!('assetId' in recu), 'un assetId du corps n\'est jamais transmis');
+    assert.strictEqual(emis[0][2].reason, 'packs');
+    // Corps absent : valeurs nulles, le service tranche
+    reinit();
+    r = await appel('POST', '/stickers/30/copy');
+    assert.strictEqual(r.status, 201);
+    assert.deepStrictEqual(
+      [appelDe('copierStickerRecu')[0].packId, appelDe('copierStickerRecu')[0].emoji], [null, null]);
+    // Inaccessible / inexistant : 404 uniforme, aucune synchro
+    reinit({ erreur: ['STICKER_NOT_FOUND', 404] });
+    r = await appel('POST', '/stickers/31/copy', { corps: {} });
+    assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_NOT_FOUND']);
+    assert.strictEqual(emis.length, 0);
+    // Pack Plus sans droit : 403 et `feature` conservé
+    etat.erreur = null;
+    reinit();
+    service.copierStickerRecu = async () => {
+      throw Object.assign(new Error('Pack réservé à Alanya Plus'),
+        { code: 'SUBSCRIPTION_REQUIRED', status: 403, feature: 'stickers_premium' });
+    };
+    r = await appel('POST', '/stickers/30/copy', { corps: {} });
+    assert.deepStrictEqual([r.status, r.corps.code, r.corps.feature], [403, 'SUBSCRIPTION_REQUIRED', 'stickers_premium']);
+    service.copierStickerRecu = via('copierStickerRecu');
+    // Quota et image bloquée : mêmes codes que `assets/:id/copy`
+    reinit({ erreur: ['STICKER_PACK_LIMIT', 409] });
+    r = await appel('POST', '/stickers/30/copy', { corps: {} });
+    assert.deepStrictEqual([r.status, r.corps.code], [409, 'STICKER_PACK_LIMIT']);
+
+    // ── POST /stickers/:stickerId/report ───────────────────────────────────
+    reinit();
+    r = await appel('POST', '/stickers/30/report', { corps: { reason: 'droits', assetId: 999 } });
+    assert.deepStrictEqual([r.status, r.corps], [200, { ok: true, deja: true }]);
+    const [sig] = appelDe('signalerStickerRecu');
+    assert.deepStrictEqual([sig.alanyaID, sig.stickerId, sig.reason], [7, '30', 'droits']);
+    assert.ok(!('assetId' in sig));
+    reinit({ erreur: ['STICKER_NOT_FOUND', 404] });
+    r = await appel('POST', '/stickers/9999999/report', { corps: { reason: 'spam' } });
+    assert.deepStrictEqual([r.status, r.corps.code], [404, 'STICKER_NOT_FOUND']);
+    reinit({ erreur: ['STICKER_INVALID_PAYLOAD', 400] });
+    r = await appel('POST', '/stickers/30/report', { corps: { reason: 'zzz' } });
+    assert.deepStrictEqual([r.status, r.corps.code], [400, 'STICKER_INVALID_PAYLOAD']);
+    // Les anciennes routes `assets/:id` restent branchées
+    reinit();
+    assert.strictEqual((await appel('POST', '/assets/55/copy', { corps: {} })).status, 201);
+    assert.ok(aLancé('copierAssetRecu') && !aLancé('copierStickerRecu'));
 
     // ── POST /packs ────────────────────────────────────────────────────────
     reinit();

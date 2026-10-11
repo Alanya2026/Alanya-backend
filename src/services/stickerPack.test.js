@@ -421,6 +421,32 @@ test('resoudrePartage : inconnu, révoqué ou archivé répondent pareil', async
   assert.ok(!/9|50/.test(e.message));
 });
 
+const APERCU = /AS count\s+FROM sticker_pack p\s+WHERE p\.share_token = \?/;
+
+test('apercuPartagePublic : jeton mal formé = null, sans interroger la base', async () => {
+  const d = base([]);
+  for (const mauvais of [undefined, null, 42, '', 'x', 'a'.repeat(25), "' OR 1=1 --", `${'a'.repeat(24)}\n`]) {
+    assert.strictEqual(await pack.apercuPartagePublic(mauvais, d), null);
+  }
+  assert.strictEqual(d.requetes.length, 0);
+});
+
+test('apercuPartagePublic : lien publié seulement, nom et compte, rien d\'autre', async () => {
+  const d = base([[APERCU, () => [[{ name_i18n: { fr: 'Chats' }, count: 3, owner_id: 9, code: 'u_9_ab' }], []]]]);
+  const r = await pack.apercuPartagePublic(JETON, d);
+  assert.deepStrictEqual(r, { nameI18n: { fr: 'Chats' }, count: 3 }, 'aucun compte, aucun code');
+  const [sql, p] = de(d, APERCU);
+  assert.match(sql, /p\.visibility = \? AND p\.status = \?/, 'lien ET publié');
+  assert.match(sql, /a\.status = 0/, 'stickers actifs seulement');
+  assert.deepStrictEqual(p, [JETON, 2, 1]);
+});
+
+test('apercuPartagePublic : inconnu, révoqué, archivé ou sans sticker actif = null', async () => {
+  assert.strictEqual(await pack.apercuPartagePublic(JETON, base([[APERCU, () => [[], []]]])), null);
+  assert.strictEqual(await pack.apercuPartagePublic(JETON,
+    base([[APERCU, () => [[{ name_i18n: { fr: 'Vide' }, count: 0 }], []]]])), null);
+});
+
 test('resoudrePartage : fiche, mon état d\'installation, propriété', async () => {
   const stickers = [{ id: 1, position: 0, emoji: '😀', name_i18n: null, storage_key: 'k', thumb_key: 't', width: 512, height: 512, bytes: 9, animated: 0 }];
   const d = base([

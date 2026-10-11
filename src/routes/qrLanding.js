@@ -1,10 +1,12 @@
-// Routes PUBLIQUES du volet QR : la page d'accueil d'un code d'identité et les
-// deux fichiers d'association qui permettront aux liens https d'ouvrir
-// directement l'app. Servies à la racine du domaine, hors /api.
+// Routes PUBLIQUES du volet QR : la page d'accueil d'un code d'identité, celle
+// d'un lien de partage de pack de stickers (`/s/<jeton>`) et les deux fichiers
+// d'association qui permettront aux liens https d'ouvrir directement l'app.
+// Servies à la racine du domaine, hors /api.
 
 const express = require('express');
 const router = express.Router();
 const { showIdentityLanding, showContactLanding } = require('../controllers/qrLandingController');
+const { showStickerShareLanding } = require('../controllers/stickerLandingController');
 
 const ANDROID_PACKAGE = process.env.QR_ANDROID_PACKAGE || 'com.alanya237.alanya';
 const IOS_BUNDLE_ID = process.env.QR_IOS_BUNDLE_ID || 'com.alanya237.alanya';
@@ -27,7 +29,10 @@ router.get('/q/c/:token', showContactLanding);
 /** Code permanent (futurs comptes business) — cible des QR `…/q/u/<jeton>`. */
 router.get('/q/u/:token', showIdentityLanding);
 
-/** Android App Links. */
+/** Lien de partage d'un pack de stickers — cible des liens `…/s/<jeton>`. */
+router.get('/s/:token', showStickerShareLanding);
+
+/** Android App Links (aucune restriction de chemin : `/s/` et `/q/` sont couverts). */
 router.get('/.well-known/assetlinks.json', (_req, res) => {
   if (ANDROID_SHA256.length === 0) {
     return res.status(404).json({ error: 'Association Android non configurée', code: 'APP_LINK_NOT_CONFIGURED' });
@@ -55,7 +60,7 @@ router.get('/.well-known/apple-app-site-association', (_req, res) => {
       details: [
         {
           appID: `${IOS_TEAM_ID}.${IOS_BUNDLE_ID}`,
-          paths: ['/q/u/*', '/q/c/*'],
+          paths: ['/q/u/*', '/q/c/*', '/s/*'],
         },
       ],
     },
