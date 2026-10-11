@@ -132,12 +132,12 @@ Contrat : `CONTRAT-STICKERS.md` §5 et §9. Aussi émis par `message:send_failed
 | Code | Statut | Sens |
 |---|---|---|
 | `STICKER_NOT_FOUND` | 404 | Sticker inconnu, ou fichier retiré (suppression par l'auteur, retrait admin) |
-| `STICKER_PACK_UNAVAILABLE` | 404 | Pack brouillon, archivé non installé, ou non officiel (V1a) |
-| `STICKER_INVALID_PAYLOAD` | 400 | `content` du type 10 illisible, version inconnue, `sid` invalide ou plus de 512 octets ; aussi stickers fermés pour ce compte |
+| `STICKER_PACK_UNAVAILABLE` | 404 | Pack brouillon, archivé non installé, ou non officiel (V1a). V1b : pack perso d'un autre compte (jamais « interdit » : même réponse qu'un pack inexistant), pack perso archivé, lien de partage mal formé, inconnu, révoqué ou d'un pack archivé (réponse identique pour les quatre) |
+| `STICKER_INVALID_PAYLOAD` | 400 | `content` du type 10 illisible, version inconnue, `sid` invalide ou plus de 512 octets ; aussi stickers fermés pour ce compte. V1b : corps de requête mal formé (`PATCH /packs/:id`, `PUT /packs/:id/order`, `POST /packs/:id/stickers`), nom vide, partage d'un pack vide |
 | `STICKER_ASSET_INVALID` | 422 | Upload refusé : format réel ni PNG ni WebP, pas 512×512, sans alpha, animé, trop lourd, corrompu (V1b, administration) |
 | `STICKER_ASSET_BLOCKED` | 422 | Empreinte du fichier présente dans `sticker_blocklist` |
-| `STICKER_QUOTA_EXCEEDED` | 429 | Quota de stickers personnels (200) ou d'uploads (30 par heure) atteint (V1b) |
-| `STICKER_PACK_LIMIT` | 409 | Limite de packs installés (50), ou de stickers par pack (40) atteinte |
+| `STICKER_QUOTA_EXCEEDED` | 429 | Quota de stickers personnels (200) ou d'uploads (30 par heure) atteint (V1b) ; aussi à l'installation d'un pack partagé qui dépasserait les 200 (seules les images que le compte n'a pas déjà comptent) |
+| `STICKER_PACK_LIMIT` | 409 | Limite de packs installés (50), de packs personnels (20, archivés exclus) ou de stickers par pack (40) atteinte ; aussi à l'installation d'un pack partagé quand les 20 packs perso sont pris |
 | `STICKER_EDIT_FORBIDDEN` | 409 | Éditer (`PUT /messages/:id`) un message de type 10 est refusé : son `content` est un JSON canonisé dont l'édition remplacerait tout par du texte affiché en brut |
 | `STICKER_PACK_INCOMPLETE` | 422 | Publication refusée par la liste de contrôle (nom FR+EN, icône, ≥ 8 stickers) ; `missing` liste ce qui manque. Admin seulement |
 | `STICKER_PACK_PUBLISHED` | 409 | Modifier ou supprimer un sticker d'un pack publié/archivé ; on archive, on ne réécrit pas. Admin seulement |
@@ -145,6 +145,8 @@ Contrat : `CONTRAT-STICKERS.md` §5 et §9. Aussi émis par `message:send_failed
 | `NOT_FOUND` | 404 | Générique, sans sens métier : `/api/stickers/*` fermé pour ce compte. Nouveau pour ce lot ; le client retombe sur le statut HTTP |
 
 `SUBSCRIPTION_REQUIRED` avec `feature: "stickers_premium"` : pack Plus installé ou envoyé sans le droit. Il ne se déclenche que sur un « non » explicite des droits ; droits indisponibles = on laisse passer.
+
+Création de packs et partage (V1b) : aucun code nouveau. `RATE_LIMITED` (429, par compte) sur `GET /share/:token` (30/min), `POST /share/:token/add` (10/min) et `POST|DELETE /packs/:id/share` (20/min). Ces routes sont derrière `creation_enabled` : fermé, `404 NOT_FOUND` générique, avant le limiteur.
 
 Réglages des stickers illisibles à l'ENVOI (base injoignable, migration non jouée) : `503 SERVICE_UNAVAILABLE` (code général, retryable — l'outbox rejoue), jamais un `STICKER_*` terminal. Les routes `/api/stickers/*`, elles, ferment en `404 NOT_FOUND`.
 

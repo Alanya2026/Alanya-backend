@@ -126,6 +126,12 @@ const contentDe = (o) => JSON.stringify({ v: 1, pack: 'mboa', sid: 4812, emoji: 
   // Pack partagé : installé oui, sinon non.
   await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 2, installed: 1 } }));
   await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 2, installed: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'pack partagé non installé');
+  // Pack partagé : son propriétaire envoie toujours, même sans l'avoir « installé ».
+  await prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 2, owner_id: 7, installed: 0 } }));
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 2, owner_id: 9, installed: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'pack partagé d\'un autre, non installé');
+  // Pack perso archivé : plus d'envoi, y compris pour son propriétaire.
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 1, owner_id: 7, pack_status: 2 } })), 'STICKER_PACK_UNAVAILABLE', 'pack perso archivé');
+  await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 2, owner_id: 7, pack_status: 2, installed: 1 } })), 'STICKER_PACK_UNAVAILABLE', 'pack partagé archivé');
   // Visibilité inconnue : refus.
   await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { visibility: 3 } })), 'STICKER_PACK_UNAVAILABLE', 'visibilité inconnue');
   assert.strictEqual((await refus(prepareStickerMessage({ content: contentDe({}), senderID: 7 }, deps({ row: { pack_status: 0 } })), 'STICKER_PACK_UNAVAILABLE', 'statut')).status, 404);

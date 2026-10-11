@@ -178,12 +178,21 @@ async function prepareStickerMessage({ content, senderID }, deps = depsParDefaut
     if (statut !== PACK_STATUS.PUBLIE && !(statut === PACK_STATUS.ARCHIVE && installe)) {
       throw refus('STICKER_PACK_UNAVAILABLE');
     }
-  } else if (visibilite === PACK_VISIBILITY.PRIVE) {
-    // Pack perso : seul son propriétaire peut envoyer ses stickers.
-    if (Number(s.owner_id) !== Number(senderID)) throw refus('STICKER_PACK_UNAVAILABLE');
-  } else if (visibilite === PACK_VISIBILITY.LIEN) {
-    // Pack partagé (V1b/T6) : il faut l'avoir installé.
-    if (!installe) throw refus('STICKER_PACK_UNAVAILABLE');
+  } else if (visibilite === PACK_VISIBILITY.PRIVE || visibilite === PACK_VISIBILITY.LIEN) {
+    // Pack perso : un pack archivé par son propriétaire (`status = 2`) n'envoie
+    // plus, pour personne.
+    if (statut === PACK_STATUS.ARCHIVE) throw refus('STICKER_PACK_UNAVAILABLE');
+    const proprietaire = Number(s.owner_id) === Number(senderID);
+    if (visibilite === PACK_VISIBILITY.PRIVE) {
+      // Privé : son propriétaire seul.
+      if (!proprietaire) throw refus('STICKER_PACK_UNAVAILABLE');
+    } else if (!proprietaire && !installe) {
+      // Partagé par lien : son propriétaire (il garde l'usage de son pack
+      // après l'avoir partagé), ou qui l'a installé. L'installation d'un lien
+      // crée une copie PRIVÉE chez le destinataire (plan §4) : c'est elle qu'il
+      // envoie, jamais le pack d'origine.
+      throw refus('STICKER_PACK_UNAVAILABLE');
+    }
   } else {
     // Visibilité inconnue : refus, jamais une ouverture par défaut.
     throw refus('STICKER_PACK_UNAVAILABLE');

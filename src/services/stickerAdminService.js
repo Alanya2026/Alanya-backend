@@ -99,6 +99,8 @@ async function listerPacks({ status, q } = {}, db = pool) {
             p.published_at, p.created_at, p.updated_at, p.cover_sticker_id,
             (SELECT COUNT(*) FROM sticker s JOIN sticker_asset a ON a.id = s.asset_id
               WHERE s.pack_id = p.id AND a.status = 0) AS sticker_count,
+            (SELECT COALESCE(SUM(a3.bytes), 0) FROM sticker s3 JOIN sticker_asset a3 ON a3.id = s3.asset_id
+              WHERE s3.pack_id = p.id AND a3.status = 0) AS total_bytes,
             (SELECT a2.thumb_key FROM sticker s2 JOIN sticker_asset a2 ON a2.id = s2.asset_id
               WHERE s2.id = p.cover_sticker_id) AS cover_thumb_key
        FROM sticker_pack p
@@ -114,7 +116,9 @@ async function getPack(id, db = pool) {
   const [rows] = await db.execute(
     `SELECT p.*,
             (SELECT COUNT(*) FROM sticker s JOIN sticker_asset a ON a.id = s.asset_id
-              WHERE s.pack_id = p.id AND a.status = 0) AS sticker_count
+              WHERE s.pack_id = p.id AND a.status = 0) AS sticker_count,
+            (SELECT COALESCE(SUM(a3.bytes), 0) FROM sticker s3 JOIN sticker_asset a3 ON a3.id = s3.asset_id
+              WHERE s3.pack_id = p.id AND a3.status = 0) AS total_bytes
        FROM sticker_pack p
       WHERE p.id = ? AND p.visibility = ?
       LIMIT 1`,

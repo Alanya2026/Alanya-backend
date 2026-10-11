@@ -52,6 +52,8 @@ const versPack = (p) => ({
   created_at: p.created_at,
   updated_at: p.updated_at,
   sticker_count: p.sticker_count != null ? Number(p.sticker_count) : undefined,
+  // Poids cumulé des fichiers actifs du pack, en octets (SUM de sticker_asset.bytes).
+  total_bytes: p.total_bytes != null ? Number(p.total_bytes) : undefined,
 });
 
 /** Forme admin d'une ligne `sticker` jointe à son actif. */

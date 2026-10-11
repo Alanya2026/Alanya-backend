@@ -158,6 +158,25 @@ test('creerPackPerso : refuse au-delà de 20 packs', async () => {
   assert.ok(!d.requetes.some(([s]) => /INSERT INTO sticker_pack/i.test(s)), 'aucun INSERT');
 });
 
+test('chargePackPerso : privé OU partagé par lien, jamais archivé, propriétaire dans la requête', async () => {
+  const d = base([[/SELECT id, code FROM sticker_pack\s+WHERE id = \? AND owner_id = \?/, () => [[{ id: 3, code: 'u_7_x' }], []]]]);
+  assert.deepStrictEqual(await sp.chargePackPerso(3, 7, d), { id: 3, code: 'u_7_x' });
+  const [sql, p] = d.requetes[0];
+  assert.match(sql, /visibility IN \(\?, \?\) AND status <> \?/);
+  assert.deepStrictEqual(p, [3, 7, sp.VISIBILITE_PRIVE, sp.VISIBILITE_LIEN, sp.STATUT_ARCHIVE]);
+});
+
+test('creerPackPerso : le plafond de 20 ne compte pas les packs archivés', async () => {
+  const d = base([
+    [COUNT_PACK_RE, () => [[{ n: 3 }], []]],
+    [/INSERT INTO sticker_pack/i, () => [{ insertId: 5 }, []]],
+  ]);
+  await sp.creerPackPerso(7, d);
+  const [sql, p] = d.requetes.find(([s]) => COUNT_PACK_RE.test(s));
+  assert.match(sql, /status <> \?/);
+  assert.deepStrictEqual(p, [7, sp.STATUT_ARCHIVE]);
+});
+
 // ── 3. packPersoParDefaut ───────────────────────────────────────────────────
 
 test('packPersoParDefaut : rend le pack existant sans rien créer', async () => {

@@ -19,7 +19,9 @@
  *     ne passe par le serveur), avec un nouvel actif dont JE suis propriétaire —
  *     l'auteur d'origine reste maître de ses fichiers ;
  *   - un pack perso est `visibility = 1` (privé), `owner_id = alanyaID`,
- *     `status = 1` (publié) : utilisable tout de suite, sans back-office.
+ *     `status = 1` (publié) : utilisable tout de suite, sans back-office. Partagé
+ *     par lien il passe à `visibility = 2` ; archivé, à `status = 2` (le plafond
+ *     de 20 packs ne compte alors plus le pack).
  *
  * Aucune règle de permission ici : les routes et l'interrupteur
  * `sticker_settings.creation_enabled` s'en chargent. Ce module ne connaît que la
@@ -42,7 +44,9 @@ const EMOJI_DEFAUT = '🙂';
 
 /** Valeurs de la migration 097 — ne jamais renuméroter (contrat §2). */
 const VISIBILITE_PRIVE = 1;
+const VISIBILITE_LIEN = 2;
 const STATUT_PUBLIE = 1;
+const STATUT_ARCHIVE = 2;
 
 /**
  * Motifs de signalement (`sticker_report.reason`). L'ordre est le contrat : on
@@ -106,13 +110,17 @@ function codePackPerso(alanyaID, alea = crypto.randomBytes(4).toString('hex')) {
   return `u_${Number(alanyaID)}_${alea}`;
 }
 
-/** Un pack perso du compte, ou `null` : la propriété est vérifiée ici. */
+/**
+ * Un pack perso du compte, ou `null` : la propriété est vérifiée ici. Privé OU
+ * partagé par lien (`visibility` 1 ou 2), jamais archivé : un pack archivé
+ * n'accepte plus de sticker.
+ */
 async function chargePackPerso(packId, alanyaID, db = pool) {
   const [rows] = await db.execute(
     `SELECT id, code FROM sticker_pack
-      WHERE id = ? AND owner_id = ? AND visibility = ?
+      WHERE id = ? AND owner_id = ? AND visibility IN (?, ?) AND status <> ?
       LIMIT 1`,
-    [packId, alanyaID, VISIBILITE_PRIVE],
+    [packId, alanyaID, VISIBILITE_PRIVE, VISIBILITE_LIEN, STATUT_ARCHIVE],
   );
   return rows[0] || null;
 }
@@ -123,8 +131,8 @@ async function chargePackPerso(packId, alanyaID, db = pool) {
  */
 async function creerPackPerso(alanyaID, db = pool) {
   const [[c]] = await db.execute(
-    'SELECT COUNT(*) AS n FROM sticker_pack WHERE owner_id = ?',
-    [alanyaID],
+    'SELECT COUNT(*) AS n FROM sticker_pack WHERE owner_id = ? AND status <> ?',
+    [alanyaID, STATUT_ARCHIVE],
   );
   if (Number(c?.n) >= MAX_PACKS_PERSO) {
     throw refus('STICKER_PACK_LIMIT', `${MAX_PACKS_PERSO} packs personnels maximum`, 409);
@@ -151,10 +159,10 @@ async function creerPackPerso(alanyaID, db = pool) {
 async function packPersoParDefaut(alanyaID, db = pool) {
   const [rows] = await db.execute(
     `SELECT id, code FROM sticker_pack
-      WHERE owner_id = ? AND visibility = ?
+      WHERE owner_id = ? AND visibility IN (?, ?) AND status <> ?
       ORDER BY sort_order ASC, id ASC
       LIMIT 1`,
-    [alanyaID, VISIBILITE_PRIVE],
+    [alanyaID, VISIBILITE_PRIVE, VISIBILITE_LIEN, STATUT_ARCHIVE],
   );
   if (rows[0]) return rows[0];
   return creerPackPerso(alanyaID, db);
@@ -433,9 +441,15 @@ module.exports = {
   MAX_STICKERS_PACK,
   EMOJI_DEFAUT,
   VISIBILITE_PRIVE,
+  VISIBILITE_LIEN,
   STATUT_PUBLIE,
+  STATUT_ARCHIVE,
   RAISONS,
   StickerPersonalError,
+  refus,
+  introuvable,
+  idPositif,
+  connexionDe,
   emojiDe,
   nomDe,
   raisonDe,

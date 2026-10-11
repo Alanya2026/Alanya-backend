@@ -16,6 +16,10 @@ const requireStickerCreation = require('../middleware/requireStickerCreation');
 const { uploadSticker, handleMulterError } = require('../middleware/upload');
 const c = require('../controllers/stickerController');
 const perso = require('../controllers/stickerPersonalController');
+const packs = require('../controllers/stickerPackController');
+const {
+  stickerShareReadLimiter, stickerShareAddLimiter, stickerShareManageLimiter,
+} = require('../middleware/rateLimiter');
 
 router.use(auth, requireStickers);
 
@@ -116,5 +120,90 @@ router.post('/report', requireStickerCreation, perso.postReport);
  *     security: [{ bearerAuth: [] }]
  */
 router.post('/packs', requireStickerCreation, perso.postPack);
+
+// ── V1b : packs perso et partage (plan §6.1) ─────────────────────────────
+// Même garde (`enabled` + `creation_enabled`) ; propriétaire seul côté service.
+// Le partage est limité en débit, par compte.
+
+/**
+ * @swagger
+ * /api/stickers/me/created:
+ *   get:
+ *     summary: Mes packs perso (stickers compris), un seul appel (V1b)
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/me/created', requireStickerCreation, packs.getMesPacks);
+
+/**
+ * @swagger
+ * /api/stickers/packs/{id}:
+ *   patch:
+ *     summary: Renomme un pack perso / change sa couverture (propriétaire seul)
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ *   delete:
+ *     summary: Archive un pack perso (propriétaire seul)
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.patch('/packs/:id', requireStickerCreation, packs.patchPack);
+router.delete('/packs/:id', requireStickerCreation, packs.deletePack);
+
+/**
+ * @swagger
+ * /api/stickers/packs/{id}/order:
+ *   put:
+ *     summary: Réordonne les stickers d'un pack perso
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.put('/packs/:id/order', requireStickerCreation, packs.putPackOrder);
+
+/**
+ * @swagger
+ * /api/stickers/packs/{id}/stickers:
+ *   post:
+ *     summary: Ajoute à un pack perso un sticker que je possède déjà
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.post('/packs/:id/stickers', requireStickerCreation, packs.postPackSticker);
+router.delete('/packs/:id/stickers/:stickerId', requireStickerCreation, packs.deletePackSticker);
+
+/**
+ * @swagger
+ * /api/stickers/packs/{id}/share:
+ *   post:
+ *     summary: Crée le lien de partage d'un pack perso → {token}
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ *   delete:
+ *     summary: Révoque le lien de partage
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.post('/packs/:id/share', requireStickerCreation, stickerShareManageLimiter, packs.postShare);
+router.delete('/packs/:id/share', requireStickerCreation, stickerShareManageLimiter, packs.deleteShare);
+
+/**
+ * @swagger
+ * /api/stickers/share/{token}:
+ *   get:
+ *     summary: Résout un lien de partage (lecture seule)
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/share/:token', requireStickerCreation, stickerShareReadLimiter, packs.getShare);
+
+/**
+ * @swagger
+ * /api/stickers/share/{token}/add:
+ *   post:
+ *     summary: Installe un pack partagé chez moi (copie des fichiers, quotas)
+ *     tags: [Stickers]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.post('/share/:token/add', requireStickerCreation, stickerShareAddLimiter, packs.postShareAdd);
 
 module.exports = router;

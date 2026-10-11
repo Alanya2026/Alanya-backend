@@ -111,11 +111,34 @@ const mediaReadLimiter = rateLimit({
   message: { error: 'Trop de téléchargements, patientez un instant', code: 'RATE_LIMITED' },
 });
 
+// Partage de packs de stickers (V1b/T6). Clé par COMPTE (le JWT est déjà posé :
+// `auth` précède) et non par IP : une classe ou un réseau mobile partagent une
+// adresse. Les jetons font 144 bits, donc non énumérables ; ces plafonds
+// protègent surtout le stockage (une installation copie jusqu'à 80 fichiers).
+const parCompte = (req) => `u${req.user?.alanyaID ?? 'anonyme'}`;
+const limiteStickerPartage = (max, message) => rateLimit({
+  windowMs: 60 * 1000,
+  max,
+  keyGenerator: parCompte,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: message, code: 'RATE_LIMITED' },
+});
+// Résoudre un lien : 30 par minute.
+const stickerShareReadLimiter = limiteStickerPartage(30, 'Trop de liens consultés, patientez un instant');
+// Installer un pack partagé (copie de fichiers) : 10 par minute.
+const stickerShareAddLimiter = limiteStickerPartage(10, 'Trop d\'installations, patientez un instant');
+// Créer / révoquer un lien : 20 par minute.
+const stickerShareManageLimiter = limiteStickerPartage(20, 'Trop de modifications de lien, patientez un instant');
+
 module.exports = { authLimiter, registerLimiter, messageLimiter, uploadLimiter, qrResolveLimiter, generalLimiter,
   mediaReadLimiter,
   phoneCheckLimiter,
   codeRedeemLimiter,
   publicOfferLimiter,
+  stickerShareReadLimiter,
+  stickerShareAddLimiter,
+  stickerShareManageLimiter,
   broadcastSendLimiter: rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 10,

@@ -5,7 +5,7 @@
  * ignorable par un client plus ancien (AGENTS.md).
  */
 
-const { resoudre } = require('./stickerI18n');
+const { resoudre, lireObjet } = require('./stickerI18n');
 
 /**
  * Packs que l'application installe d'office. Aucune colonne ne le porte
@@ -41,6 +41,22 @@ function presentCatalog({ packs, version, lang, urlDe, verrouille }) {
   };
 }
 
+/** Un sticker au format du contrat (`pack.json`) : mêmes clés partout. */
+function presentSticker(s, { lang, urlDe }) {
+  return {
+    id: Number(s.id),
+    position: Number(s.position),
+    emoji: s.emoji,
+    name: resoudre(s.name_i18n, lang),
+    url: urlDe(s.storage_key),
+    thumb: urlDe(s.thumb_key || s.storage_key),
+    w: Number(s.width) || 512,
+    h: Number(s.height) || 512,
+    animated: bool(s.animated),
+    bytes: Number(s.bytes) || 0,
+  };
+}
+
 function presentPack({ pack, stickers, lang, urlDe, verrouille }) {
   return {
     id: Number(pack.id),
@@ -50,18 +66,58 @@ function presentPack({ pack, stickers, lang, urlDe, verrouille }) {
     version: Number(pack.version) || 1,
     isPremium: bool(pack.is_premium),
     locked: bool(pack.is_premium) && Boolean(verrouille),
-    stickers: stickers.map((s) => ({
-      id: Number(s.id),
-      position: Number(s.position),
-      emoji: s.emoji,
-      name: resoudre(s.name_i18n, lang),
-      url: urlDe(s.storage_key),
-      thumb: urlDe(s.thumb_key || s.storage_key),
-      w: Number(s.width) || 512,
-      h: Number(s.height) || 512,
-      animated: bool(s.animated),
-      bytes: Number(s.bytes) || 0,
-    })),
+    stickers: stickers.map((s) => presentSticker(s, { lang, urlDe })),
+  };
+}
+
+/** Vignette de couverture : le sticker désigné, à défaut le premier. */
+function vignetteDe(coverId, stickers, urlDe) {
+  const choisi = stickers.find((s) => Number(s.id) === Number(coverId)) || stickers[0];
+  return choisi ? urlDe(choisi.thumb_key || choisi.storage_key) : null;
+}
+
+/**
+ * « Mes packs » (V1b) : packs perso actifs du compte avec leurs stickers.
+ * `shareToken` n'est rendu qu'ici, à son propriétaire.
+ *
+ * @param {Array} p.packs     lignes `sticker_pack`
+ * @param {Array} p.stickers  lignes `sticker` + actif, `pack_id` en tête
+ */
+function presentMesPacks({ packs, stickers, lang, urlDe }) {
+  return {
+    packs: packs.map((p) => {
+      const siens = stickers.filter((s) => Number(s.pack_id) === Number(p.id));
+      return {
+        id: Number(p.id),
+        code: p.code,
+        name: resoudre(p.name_i18n, lang),
+        nameI18n: lireObjet(p.name_i18n),
+        version: Number(p.version) || 1,
+        shared: Number(p.visibility) === 2,
+        shareToken: p.share_token || null,
+        cover: vignetteDe(p.cover_sticker_id, siens, urlDe),
+        count: siens.length,
+        stickers: siens.map((s) => ({ ...presentSticker(s, { lang, urlDe }), assetId: Number(s.asset_id) })),
+      };
+    }),
+  };
+}
+
+/**
+ * Fiche d'un lien de partage : lecture seule. Aucun identifiant de compte ne
+ * sort (`mine` suffit) ; `addedPackId` = ma copie, si je l'ai déjà installée.
+ */
+function presentPartage({ pack, stickers, mine, addedPackId, lang, urlDe }) {
+  return {
+    name: resoudre(pack.name_i18n, lang),
+    description: resoudre(pack.description_i18n, lang),
+    version: Number(pack.version) || 1,
+    cover: vignetteDe(pack.cover_sticker_id, stickers, urlDe),
+    count: stickers.length,
+    mine: Boolean(mine),
+    added: addedPackId != null,
+    addedPackId: addedPackId == null ? null : Number(addedPackId),
+    stickers: stickers.map((s) => presentSticker(s, { lang, urlDe })),
   };
 }
 
@@ -74,4 +130,6 @@ function presentMe({ packs, favorites, version }) {
   };
 }
 
-module.exports = { PACKS_INSTALLES_PAR_DEFAUT, presentCatalog, presentPack, presentMe };
+module.exports = {
+  PACKS_INSTALLES_PAR_DEFAUT, presentCatalog, presentPack, presentMe, presentMesPacks, presentPartage,
+};

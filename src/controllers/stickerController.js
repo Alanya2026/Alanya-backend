@@ -179,6 +179,7 @@ async function deleteFavorite(req, res) {
 }
 
 module.exports = {
+  langueDeRequete,
   getCatalog,
   getPack,
   getMe,
