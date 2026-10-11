@@ -66,7 +66,7 @@ async function main() {
     const buffer = fs.readFileSync(chemin);
     // Blocage et quotas seront rejoués par le service, avec la base ; ici, le
     // contrôle réel suffit à tout refuser d'avance.
-    const pret = await preparerAsset(buffer, { ownerId: 0 });
+    const pret = await preparerAsset(buffer, { ownerId: 0, animeAutorise: true });
     octets.set(s.id, buffer);
     console.log(`  ok  ${s.fichier.padEnd(22)} ${String(pret.bytes).padStart(6)} o  q${pret.qualite}`);
   }
@@ -109,7 +109,7 @@ async function main() {
           WHERE s.pack_id = ? AND s.position = ?`,
         [packId, s.position],
       );
-      const pret = await preparerAsset(octets.get(s.id), { ownerId: 0 });
+      const pret = await preparerAsset(octets.get(s.id), { ownerId: 0, animeAutorise: true });
       if (dejaLa.length) {
         if (dejaLa[0].sha256 !== pret.sha256) {
           throw new Error(`position ${s.position} (${s.id}) déjà occupée par un autre fichier : un fichier officiel ne se remplace pas, il se retire`);
