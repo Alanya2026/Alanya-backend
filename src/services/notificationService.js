@@ -16,6 +16,7 @@ const {
 } = require('../notifications/notificationContract');
 const { getMessagePushOptions } = require('../notifications/notificationPolicy');
 const { DEVICE_REGISTRY_V2, ANDROID_NATIVE_V2, IOS_RICH_NSE, IOS_VOIP_V2 } = require('../notifications/notificationFlags');
+const { personnaliserNomContact } = require('../notifications/notificationContactName');
 const { resolvePushTargets, resolveCallPushTargets } = require('../notifications/pushDeviceRegistry');
 const { sendVoipPush, clearVoipToken, isConfigured: isVoipConfigured } = require('../notifications/apnsVoipProvider');
 const { evaluateMessagePush, evaluateTypePush } = require('../notifications/notificationFilter');
@@ -278,7 +279,9 @@ const sendDataOnlyNotification = async (fcmToken, data = {}, meta = {}) => {
   }
 };
 
-const sendToUser = async (alanyaID, data = {}, options = {}) => {
+const sendToUser = async (alanyaID, rawData = {}, options = {}) => {
+  // Nom personnalisé du destinataire pour l'expéditeur — un seul endroit.
+  const data = await personnaliserNomContact(alanyaID, rawData);
   if (shouldUseDeviceRegistry(DEVICE_REGISTRY_V2, data)) {
     return sendToUserDevices(alanyaID, data, options);
   }
@@ -447,7 +450,8 @@ const sendToUserDevices = async (alanyaID, data = {}, options = {}) => {
 /**
  * Appels : multi-appareil + VoIP APNs iOS si IOS_VOIP_V2 (sinon FCM data-only).
  */
-const sendCallToUser = async (alanyaID, data = {}, options = {}) => {
+const sendCallToUser = async (alanyaID, rawData = {}, options = {}) => {
+  const data = await personnaliserNomContact(alanyaID, rawData);
   if (!DEVICE_REGISTRY_V2) {
     return sendToUserLegacy(alanyaID, data, {});
   }
@@ -504,7 +508,8 @@ const sendCallToUser = async (alanyaID, data = {}, options = {}) => {
  * @param {object} [options]
  * @param {string} [options.excludeDeviceId] — ne pas pousser vers cet appareil (gagnant claim).
  */
-const sendCallEndedToUser = async (alanyaID, data = {}, options = {}) => {
+const sendCallEndedToUser = async (alanyaID, rawData = {}, options = {}) => {
+  const data = await personnaliserNomContact(alanyaID, rawData);
   const { normalizeDeviceId } = require('../utils/deviceId');
   const excludeDeviceId = normalizeDeviceId(options.excludeDeviceId);
 
@@ -802,7 +807,7 @@ const notifyGroupCall = async (targetUserIds = [], callerID, callerName, callerP
   }
 };
 
-const notifyStatusView = async (statusOwnerID, viewerName) => {
+const notifyStatusView = async (statusOwnerID, viewerName, viewerID = null) => {
   const decision = await evaluateTypePush(statusOwnerID, 'status_view');
   if (!decision.allowed) {
     logSkipped({
@@ -816,6 +821,7 @@ const notifyStatusView = async (statusOwnerID, viewerName) => {
     type:  'status_view',
     title: 'Nouveau spectateur',
     body:  `${viewerName} a vu votre statut`,
+    ...(viewerID ? { aboutUserId: viewerID, aboutName: viewerName } : {}),
   });
 };
 
@@ -837,7 +843,7 @@ const notifyStatusView = async (statusOwnerID, viewerName) => {
 const notifyVoicemailActive = async (
   targetID,
   callerName,
-  { activeUntil = null, timeZone = null } = {},
+  { activeUntil = null, timeZone = null, callerID = null } = {},
 ) => {
   // Les préférences d'abord, le quota ensuite — et pas l'inverse. Réserver la
   // journée puis se faire refouler par « Ne pas déranger » brûlerait le droit
@@ -876,6 +882,7 @@ const notifyVoicemailActive = async (
     type:  'voicemail_active',
     title: 'Votre répondeur a répondu',
     body:  `${qui} a essayé de vous appeler.${jusqua}`,
+    ...(callerID ? { aboutUserId: callerID, aboutName: qui } : {}),
   });
 };
 
@@ -902,8 +909,9 @@ const notifyQrContactScanned = async (ownerID, scanner, alreadyMutual) => {
   });
 };
 
-const notifyMeetingInvite = async (participantId, organiserName, meetingTitle, meetingTime, meetingId) => {
+const notifyMeetingInvite = async (participantId, organiserName, meetingTitle, meetingTime, meetingId, organiserId = null) => {
   await sendToUser(participantId, {
+    ...(organiserId ? { aboutUserId: organiserId, aboutName: String(organiserName) } : {}),
     type:          'meeting_invite',
     title:         'Nouvelle réunion',
     body:          `${organiserName} vous invite à : ${meetingTitle}`,

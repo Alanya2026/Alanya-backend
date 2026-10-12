@@ -353,7 +353,8 @@ const inviteParticipants = async (req, res) => {
             meeting.organiser_nom,
             meeting.objet,
             meeting.start_time,
-            id
+            id,
+            meeting.idOrganiser
           );
         } catch (err) {
           console.error('[Meeting] Erreur notification invite:', err.message);

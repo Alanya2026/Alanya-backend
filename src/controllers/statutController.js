@@ -312,7 +312,7 @@ const viewStatus = async (req, res) => {
           seenAt: new Date().toISOString(),
         });
 
-        await notifyStatusView(ownerID, v.nom || 'Quelqu\'un');
+        await notifyStatusView(ownerID, v.nom || 'Quelqu\'un', v.alanyaID);
       }
     }
 

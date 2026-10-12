@@ -376,6 +376,7 @@ async function basculerVersRepondeur({
   }
 
   notifyVoicemailActive(targetID, callerName, {
+    callerID,
     activeUntil,
     timeZone: schedule?.resolvedTimezone,
   }).catch((err) => console.warn('[Répondeur] notify:', err.message));
