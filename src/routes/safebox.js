@@ -70,7 +70,7 @@ router.get('/', auth, lecture, c.overview);
  *       - bearerAuth: []
  * /api/safebox/folders:
  *   post:
- *     summary: Créer un sous-dossier — `{ parentId, name }`
+ *     summary: "Créer un sous-dossier — { parentId, name }"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
@@ -111,13 +111,13 @@ router.post('/folders/:id/restore', auth, ecriture, c.restoreFolder);
  *     security:
  *       - bearerAuth: []
  *   post:
- *     summary: Adresses d'envoi de blocs choisis — `{ blocks: [n…], preview? }`, 64 au plus
+ *     summary: "Adresses d'envoi de blocs choisis — { blocks: [n…], preview? }, 64 au plus"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
  * /api/safebox/uploads/{id}/complete:
  *   post:
- *     summary: Terminer l'envoi — `{ key }`, la clé du fichier en base64 (32 octets)
+ *     summary: "Terminer l'envoi — { key }, la clé du fichier en base64 (32 octets)"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
