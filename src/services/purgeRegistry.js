@@ -23,7 +23,7 @@ const pool = require('../config/db');
 const mediaPolicy = require('../constants/mediaRetentionPolicy');
 const tripPolicy = require('../constants/tripPolicy');
 
-const NAMES = ['media', 'broadcast', 'story', 'welcome_status', 'trip', 'data_retention', 'backup_key_access', 'e2ee_envelope'];
+const NAMES = ['media', 'broadcast', 'story', 'welcome_status', 'trip', 'data_retention', 'backup_key_access', 'e2ee_envelope', 'safebox'];
 
 /** Borne une valeur de réglage. Une saisie hors bornes est ramenée, jamais rejetée en silence. */
 function clampInt(value, { min, max, fallback }) {
@@ -385,6 +385,49 @@ const DESCRIPTORS = {
     async run() {
       const { runDataRetentionPurge } = require('./dataRetentionService');
       return runDataRetentionPurge();
+    },
+  },
+
+  safebox: {
+    label: 'Coffre-fort',
+    description:
+      'Supprime la corbeille du coffre-fort au-delà de sa durée et les envois '
+      + 'abandonnés, puis efface chez MEGA S4 les fichiers que plus aucun coffre '
+      + "ne désigne (y compris ceux des comptes supprimés). MEGA S4 n'a pas de "
+      + "cycle de vie : sans cette purge, rien n'y est jamais effacé. La nuit, "
+      + "elle s'arrête avant de toucher MEGA si elle dépasse le seuil d'arrêt : "
+      + 'la lancer à la main vaut confirmation. Les fichiers du coffre ne '
+      + "s'effacent jamais par ancienneté.",
+    knobs: [{
+      key: 'trashDays',
+      label: 'Durée de la corbeille',
+      unit: 'jours',
+      min: 1,
+      max: 365,
+      default: () => 30,
+    }, {
+      key: 'abandonHours',
+      label: 'Envoi abandonné après',
+      unit: 'heures sans nouveau bloc',
+      // Pas moins : un téléphone peut rester hors réseau une nuit entière.
+      min: 6,
+      max: 720,
+      default: () => 48,
+    }, {
+      key: 'alertFloor',
+      label: "Seuil d'arrêt automatique",
+      unit: 'fichiers par nuit',
+      min: 1,
+      max: 1_000_000,
+      default: () => 5000,
+    }],
+    async stats(opts) {
+      const { purgeStats } = require('./safebox/purge');
+      return purgeStats(opts);
+    },
+    async run(opts, { trigger } = {}) {
+      const { runSafeboxPurge } = require('./safebox/purge');
+      return runSafeboxPurge(opts, { trigger });
     },
   },
 };

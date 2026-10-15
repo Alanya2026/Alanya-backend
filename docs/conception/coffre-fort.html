@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Coffre-fort Alanya</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  /* Même charte que les documents « Médias Backblaze » et « Trois buckets » :
+     colonne de lecture avec numéro de section en marge, tableaux et encadrés sobres. */
+  :root {
+    --ground:    #E9EBEE;
+    --surface:   #F8F9FA;
+    --surface-2: #DFE3E7;
+    --ink:       #161B21;
+    --ink-soft:  #3D4750;
+    --muted:     #626D77;
+    --rule:      #CBD1D7;
+    --rule-soft: #DDE1E6;
+    --keep:      #1C6560;
+    --keep-bg:   #DDE8E6;
+    --drop:      #99511C;
+    --drop-bg:   #EFE2D6;
+    --alarm:     #962C2C;
+    --alarm-bg:  #EFDCDC;
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body:    "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono:    "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground:    #12161A;
+      --surface:   #1A1F25;
+      --surface-2: #242B32;
+      --ink:       #E5E9EC;
+      --ink-soft:  #C0C8CF;
+      --muted:     #8D99A3;
+      --rule:      #2C343C;
+      --rule-soft: #232A31;
+      --keep:      #5FB9B1;
+      --keep-bg:   #17302E;
+      --drop:      #D9944F;
+      --drop-bg:   #33261A;
+      --alarm:     #E08279;
+      --alarm-bg:  #35201F;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground:    #12161A;
+    --surface:   #1A1F25;
+    --surface-2: #242B32;
+    --ink:       #E5E9EC;
+    --ink-soft:  #C0C8CF;
+    --muted:     #8D99A3;
+    --rule:      #2C343C;
+    --rule-soft: #232A31;
+    --keep:      #5FB9B1;
+    --keep-bg:   #17302E;
+    --drop:      #D9944F;
+    --drop-bg:   #33261A;
+    --alarm:     #E08279;
+    --alarm-bg:  #35201F;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, p, ul, ol, pre, figure { margin: 0; }
+
+  .page { max-width: 1140px; margin: 0 auto; padding: 56px 20px 120px; }
+  @media (min-width: 700px) { .page { padding-left: 28px; padding-right: 28px; } }
+
+  .band { display: grid; grid-template-columns: 1fr; }
+  @media (min-width: 940px) {
+    .band { grid-template-columns: 108px minmax(0, 1fr); column-gap: 40px; }
+  }
+  .band > .gutter { display: none; }
+  @media (min-width: 940px) { .band > .gutter { display: block; } }
+
+  .col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  .col > p, .col > ul.plain { max-width: 68ch; }
+
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 26px; margin-bottom: 34px; display: flex; flex-direction: column; gap: 16px; }
+  .kicker { font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  h1 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(34px, 5.4vw, 58px); line-height: 1.02;
+    letter-spacing: -.025em; text-wrap: balance;
+  }
+  .standfirst { font-size: 20px; line-height: 1.5; color: var(--ink-soft); max-width: 62ch; }
+
+  .decisions { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin: 0 0 60px; }
+  @media (min-width: 780px) { .decisions { grid-template-columns: repeat(3, 1fr); } }
+  .decision { background: var(--surface); padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 7px; }
+  .lbl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .decision .val { font-family: var(--display); font-weight: 600; font-size: 17px; line-height: 1.28; letter-spacing: -.01em; }
+  .decision .note { font-size: 14.5px; color: var(--muted); line-height: 1.45; }
+
+  section { margin-bottom: 66px; }
+  .gutter .num { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; color: var(--muted); padding-top: 10px; border-top: 1px solid var(--rule); display: block; }
+  h2 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(24px, 3vw, 31px); line-height: 1.12; letter-spacing: -.02em;
+    text-wrap: balance; padding-top: 8px; border-top: 1px solid var(--rule);
+  }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 18.5px; letter-spacing: -.008em; margin-top: 12px; text-wrap: balance; }
+  strong { font-weight: 600; color: var(--ink); }
+
+  code { font-family: var(--mono); font-size: .855em; background: var(--surface-2); padding: .12em .38em; border-radius: 2px; word-break: break-word; }
+
+  .chip {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em;
+    text-transform: uppercase; border: 1px solid currentColor;
+    padding: 0 6px; border-radius: 2px; white-space: nowrap; vertical-align: 2px;
+  }
+  .chip.ok { color: var(--keep); }
+  .chip.todo { color: var(--drop); }
+  .chip.risk { color: var(--alarm); }
+
+  figure { background: var(--surface); border: 1px solid var(--rule); padding: 26px 24px 18px; overflow-x: auto; margin: 10px 0; }
+  figure svg { display: block; width: 100%; min-width: 700px; height: auto; color: var(--ink); }
+  figcaption { margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--rule-soft); font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+  .d-box { fill: var(--surface); stroke: var(--ink); stroke-width: 1.4; }
+  .d-box-keep { fill: var(--keep-bg); stroke: var(--keep); stroke-width: 1.6; }
+  .d-life { stroke: var(--rule); stroke-width: 1.4; stroke-dasharray: 4 4; fill: none; }
+  .d-line { stroke: var(--ink); stroke-width: 1.4; fill: none; }
+  .d-line-keep { stroke: var(--keep); stroke-width: 2.2; fill: none; }
+  .d-txt-s { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .03em; }
+  .d-txt-m { fill: var(--ink-soft); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; }
+  .d-txt-b { fill: var(--ink); font-family: "Archivo", sans-serif; font-weight: 600; font-size: 13px; }
+  .d-txt-keep { fill: var(--keep); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: .02em; }
+  .m-ink { fill: var(--ink); }
+  .m-keep { fill: var(--keep); }
+
+  pre {
+    background: var(--surface); border: 1px solid var(--rule); border-left: 3px solid var(--keep);
+    padding: 16px 18px; overflow-x: auto;
+    font-family: var(--mono); font-size: 13px; line-height: 1.66; color: var(--ink-soft);
+  }
+  pre .c { color: var(--muted); }
+  pre .k { color: var(--keep); }
+
+  ol.steps { list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 18px; padding: 0; max-width: 74ch; }
+  ol.steps > li { counter-increment: s; display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: 16px; align-items: start; }
+  ol.steps > li::before {
+    content: counter(s); font-family: var(--mono); font-size: 12px; color: var(--keep);
+    border: 1px solid var(--keep); width: 26px; height: 26px;
+    display: grid; place-items: center; border-radius: 50%; margin-top: 2px;
+  }
+  ol.steps .step { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  ol.steps .step p { font-size: 16px; }
+  ol.steps .step p.sub { font-size: 15px; color: var(--muted); }
+
+  ul.plain { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+  ul.plain li::marker { color: var(--muted); }
+
+  .callout, .note-box { border: 1px solid var(--rule); padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 80ch; }
+  .callout { border-left: 3px solid var(--alarm); background: var(--alarm-bg); }
+  .callout .lbl { color: var(--alarm); }
+  .note-box { border-left: 3px solid var(--keep); background: var(--surface); }
+  .note-box .lbl { color: var(--keep); }
+  .callout p, .note-box p { font-size: 15.5px; line-height: 1.55; }
+
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; min-width: 680px; background: var(--surface); }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--rule-soft); font-size: 15px; line-height: 1.5; vertical-align: top; }
+  th { font-family: var(--display); font-weight: 600; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); }
+  td:first-child { font-family: var(--mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  .tbl-prose td:first-child { font-family: var(--display); font-weight: 600; font-size: 14.5px; white-space: normal; min-width: 150px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .open { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  @media (min-width: 780px) { .open { grid-template-columns: repeat(2, 1fr); } }
+  .open > div { background: var(--surface); padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .open h3 { margin: 0; font-size: 16.5px; }
+  .open p { font-size: 15px; line-height: 1.52; color: var(--ink-soft); }
+  .open p.reco { color: var(--keep); font-size: 14.5px; }
+
+  a { color: var(--keep); }
+  :focus-visible { outline: 2px solid var(--keep); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="kicker">Alanya · backend, app et admin · conception · 15/10/2026 · version 5 · lot 1 (backend) codé le 15/10, non commité</div>
+    <h1>Le coffre-fort</h1>
+    <p class="standfirst">Un espace où l'inscrit dépose les fichiers qu'il veut garder : photos, vidéos, audios et documents, rangés dans des dossiers. Les fichiers vivent chez MEGA S4, chiffrés par le téléphone. Le coffre sert aussi à envoyer à un autre inscrit un fichier trop gros pour une discussion, jusqu'à 1 Go.</p>
+  </header>
+
+  <div class="decisions">
+    <div class="decision">
+      <div class="lbl">Stockage</div>
+      <div class="val">MEGA S4, bucket <code>safebox</code></div>
+      <div class="note">Le téléphone envoie et télécharge directement chez MEGA avec des adresses signées. Le serveur décide de tout mais aucun octet de fichier ne passe par lui.</div>
+    </div>
+    <div class="decision">
+      <div class="lbl">Espace</div>
+      <div class="val">10 Go offerts, davantage avec Alanya Plus</div>
+      <div class="note">Le serveur compte les octets réellement stockés. Il réserve la place avant chaque envoi, si bien qu'on ne peut pas dépasser son espace.</div>
+    </div>
+    <div class="decision">
+      <div class="lbl">Gros fichiers</div>
+      <div class="val">Jusqu'à 1 Go, envoyés depuis le coffre</div>
+      <div class="note">Le fichier reste dans le coffre de l'expéditeur, sur son espace, jusqu'à ce qu'il le supprime lui-même. Les médias de discussion ne sont pas touchés.</div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">01</span></div>
+    <div class="col">
+      <h2>Ce que le coffre n'est pas</h2>
+      <p>Alanya a déjà plusieurs choses qui gardent des fichiers ou portent le nom de coffre. Le coffre-fort ne remplace aucune d'elles et ne doit pas se confondre avec elles, ni dans l'application ni dans le code.</p>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Mécanisme</th><th>Ce qu'il garde</th><th>Où</th><th>Combien de temps</th></tr></thead>
+          <tbody>
+            <tr><td>Coffre-fort (ce document)</td><td>Les fichiers que l'inscrit choisit de déposer, rangés en dossiers</td><td>MEGA S4, <code>safebox</code></td><td>Sans limite de durée, même si le compte reste inactif. Seul ce qui dépasse l'espace après la fin d'Alanya Plus est supprimé</td></tr>
+            <tr><td>Médias de discussion</td><td>Photos, vidéos, vocaux et fichiers envoyés dans une discussion, 100 Mo au plus (200 Mo abonné)</td><td>Cloudflare R2</td><td>30 jours, ou 365 avec Alanya Plus</td></tr>
+            <tr><td>Sauvegarde</td><td>La base du téléphone, sans les médias, chiffrée</td><td>Google Drive de l'inscrit</td><td>Deux versions, remplacées automatiquement</td></tr>
+            <tr><td>Exportation</td><td>Les médias d'une période, dans un zip en clair</td><td>Le téléphone, ou Drive</td><td>Ce que l'inscrit en fait</td></tr>
+            <tr><td>Coffre à pièces d'identité</td><td>Les pièces envoyées pour la vérification du compte</td><td>Disque du serveur (<code>documentVault.js</code>)</td><td>Détruites 90 jours après la décision</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note-box">
+        <div class="lbl">Nom dans le code</div>
+        <p>Le mot <em>vault</em> est déjà pris deux fois : <code>documentVault.js</code> (pièces d'identité, variables <code>VAULT_KEY</code> et <code>VAULT_DIR</code>) côté serveur, et <code>vault_service.dart</code> (coffre d'historique chiffré) sur la branche <code>chiffrement-messages</code> de l'application. Le coffre-fort s'appellera donc <strong><code>safebox</code></strong> partout dans le code, comme son bucket : tables <code>safebox_*</code>, routes <code>/api/safebox</code>, réglages <code>SAFEBOX_*</code>. L'inscrit, lui, voit « Coffre-fort ».</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">02</span></div>
+    <div class="col">
+      <h2>Quatre dossiers, et des sous-dossiers à volonté</h2>
+      <p>Chaque coffre s'ouvre sur quatre dossiers fixes. L'inscrit ne peut ni les renommer ni les supprimer. Il crée dedans les sous-dossiers qu'il veut, et chaque arbre n'accepte qu'une famille de fichiers. <strong>La famille se décide par l'extension du fichier</strong> (décision du 15/10).</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Dossier</th><th>Extensions acceptées</th><th>Compression proposée</th></tr></thead>
+          <tbody>
+            <tr><td>albums</td><td>.jpg .jpeg .png .heic .heif .webp .gif</td><td>Oui</td></tr>
+            <tr><td>videos</td><td>.mp4 .mov .m4v .mkv .3gp .webm .avi</td><td>Oui</td></tr>
+            <tr><td>audios</td><td>.mp3 .m4a .aac .wav .flac .ogg .opus .amr</td><td>Oui</td></tr>
+            <tr><td>documents</td><td>.pdf .doc .docx .xls .xlsx .ppt .pptx .odt .ods .odp .txt .csv .rtf .zip .rar .7z .apk ; les images de scanner ou de dessin .tif .tiff .bmp .svg ; toute extension absente des trois lignes du dessus</td><td>Non</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Une photo prise au téléphone, en .jpg ou .heic, va donc dans « albums », même si elle montre un document. Un scan en .pdf ou en .tiff va dans « documents ». La liste des extensions est un réglage du serveur que l'application lit à l'ouverture du coffre : ajouter une extension ne demande pas de nouvelle version de l'application.</p>
+      <h3>Règles</h3>
+      <ul class="plain">
+        <li><strong>Les dossiers n'existent qu'en base.</strong> Chez MEGA, un fichier est rangé sous un nom opaque, <code>u/&lt;empreinte du compte&gt;/&lt;uuid&gt;/</code>, découpé en blocs (section 03). Renommer ou déplacer un fichier ou un dossier ne touche donc qu'une ligne en base. C'est instantané, alors que S4 n'a pas de renommage : il faudrait copier puis supprimer chaque fichier. Les noms des fichiers et des dossiers ne sortent jamais d'Alanya.</li>
+        <li><strong>Un sous-dossier reste dans sa famille.</strong> On peut déplacer un dossier ou un fichier d'un sous-dossier à l'autre, jamais d'« albums » vers « videos ».</li>
+        <li><strong>L'extension se vérifie deux fois.</strong> Le téléphone propose le bon dossier racine et refuse un fichier déposé dans un dossier d'une autre famille. Le serveur refuse ensuite toute extension hors de la famille du dossier. Il ne peut pas inspecter le contenu, puisque le fichier lui arrive chiffré : un fichier renommé passe, mais il compte dans l'espace comme les autres.</li>
+        <li><strong>Limites proposées</strong>, réglables par l'admin : 5 niveaux de sous-dossiers, 500 dossiers par compte, nom de 1 à 80 caractères, unique dans son dossier parent.</li>
+        <li><strong>Les quatre dossiers se créent à la première ouverture du coffre</strong>, pas par une migration sur tous les comptes. Leur nom est traduit par l'application (fr, en, zh) : la base ne garde que leur type.</li>
+        <li><strong>Supprimer un dossier</strong> envoie tout son contenu à la corbeille (section 08).</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">03</span></div>
+    <div class="col">
+      <h2>Déposer un fichier</h2>
+      <p>L'inscrit choisit des fichiers depuis sa galerie, ses fichiers ou l'appareil photo. Le reste se fait sans lui, en tâche de fond, avec une notification de progression.</p>
+
+      <figure>
+        <svg viewBox="0 0 780 330" role="img" aria-labelledby="fig1t">
+          <title id="fig1t">Envoi d'un fichier dans le coffre : le téléphone parle au serveur pour obtenir des adresses signées, puis envoie directement chez MEGA S4</title>
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-ink"/></marker>
+            <marker id="ahk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-keep"/></marker>
+          </defs>
+          <rect x="40" y="14" width="150" height="40" rx="2" class="d-box"/>
+          <text x="115" y="39" text-anchor="middle" class="d-txt-b">Téléphone</text>
+          <rect x="315" y="14" width="150" height="40" rx="2" class="d-box"/>
+          <text x="390" y="39" text-anchor="middle" class="d-txt-b">Serveur Alanya</text>
+          <rect x="590" y="14" width="150" height="40" rx="2" class="d-box-keep"/>
+          <text x="665" y="39" text-anchor="middle" class="d-txt-b">MEGA S4 · safebox</text>
+          <line x1="115" y1="54" x2="115" y2="318" class="d-life"/>
+          <line x1="390" y1="54" x2="390" y2="318" class="d-life"/>
+          <line x1="665" y1="54" x2="665" y2="318" class="d-life"/>
+
+          <line x1="115" y1="92" x2="388" y2="92" class="d-line" marker-end="url(#ah)"/>
+          <text x="125" y="84" class="d-txt-m">1 · déposer 840 Mo (videos/Mariage)</text>
+
+          <line x1="390" y1="130" x2="117" y2="130" class="d-line" marker-end="url(#ah)"/>
+          <text x="125" y="122" class="d-txt-m">2 · place réservée + 105 adresses</text>
+
+          <line x1="115" y1="174" x2="663" y2="174" class="d-line-keep" marker-end="url(#ahk)"/>
+          <text x="125" y="166" class="d-txt-keep">3 · 105 blocs chiffrés de 8 Mio, envoyés en direct</text>
+
+          <line x1="115" y1="218" x2="388" y2="218" class="d-line" marker-end="url(#ah)"/>
+          <text x="125" y="210" class="d-txt-m">4 · terminé : clé du fichier</text>
+
+          <line x1="390" y1="256" x2="663" y2="256" class="d-line" marker-end="url(#ah)"/>
+          <text x="400" y="248" class="d-txt-m">5 · compter les blocs, vérifier</text>
+
+          <line x1="390" y1="300" x2="117" y2="300" class="d-line" marker-end="url(#ah)"/>
+          <text x="125" y="292" class="d-txt-m">6 · fichier visible, espace à jour</text>
+        </svg>
+        <figcaption>Le serveur n'échange avec MEGA que des ordres et des vérifications. Les 840 Mo vont du téléphone à MEGA sans passer par le VPS : ni bande passante du serveur, ni délai de relais.</figcaption>
+      </figure>
+
+      <ol class="steps">
+        <li><div class="step"><p><strong>Choix et question de compression.</strong> Pour les photos, vidéos et audios, l'application pose la question de la section 04 avant tout envoi.</p></div></li>
+        <li><div class="step"><p><strong>Préparation sur le téléphone.</strong> Compression si elle est choisie, puis chiffrement (section 05) dans un fichier temporaire, et l'aperçu chiffré décrit en section 07 (photo, image d'une vidéo, première page d'un PDF, pochette d'un audio).</p><p class="sub">Il faut autant de place libre sur le téléphone que la taille du fichier. L'application le vérifie avant de commencer et le dit clairement si elle manque.</p></div></li>
+        <li><div class="step"><p><strong>Réservation.</strong> Le téléphone annonce le dossier, le nom, le type et la taille chiffrée exacte. Dans une transaction, le serveur vérifie la famille du dossier et que <code>utilisé + réservé + taille ≤ espace</code>, puis réserve la place. Deux envois en parallèle ne peuvent donc pas dépasser l'espace.</p></div></li>
+        <li><div class="step"><p><strong>Envoi direct, en blocs indépendants.</strong> Le fichier chiffré est découpé en blocs de 8 Mio. Chaque bloc est un objet séparé chez MEGA, <code>u/&lt;empreinte du compte&gt;/&lt;uuid&gt;/00001</code>, <code>…/00002</code>, etc., envoyé par une simple requête PUT signée. Un fichier de 8 Mio ou moins tient en un seul bloc. Chaque adresse signée fixe la taille exacte du bloc : MEGA refuse (403) un bloc plus gros que prévu, testé le 14/10 et le 15/10.</p></div></li>
+        <li><div class="step"><p><strong>Fin.</strong> Le serveur liste les blocs chez MEGA (<code>ListObjectsV2</code>, une requête pour 1 000 blocs), vérifie leur nombre et la taille de chacun, convertit la réservation en espace utilisé, et le fichier apparaît. S'il manque un bloc, le téléphone le renvoie.</p></div></li>
+      </ol>
+
+      <h3>Réseau qui coupe, application fermée</h3>
+      <p>Un fichier de 1 Go sur une connexion mobile au Cameroun va être interrompu. Les envois doivent reprendre là où ils se sont arrêtés, même après la fermeture de l'application.</p>
+      <div class="callout">
+        <div class="lbl">Pourquoi pas l'envoi en morceaux de S3</div>
+        <p>La version 3 prévoyait l'envoi en morceaux de S3 (<em>multipart</em>). Le lot 0 du 15/10 a montré que MEGA S4 abandonne parfois l'envoi entier après une coupure, morceaux déjà reçus compris : 2 coupures sur 5 ont donné « NoSuchUpload ». Un fichier de 1 Go coupé à 900 Mo serait reparti de zéro. Avec des blocs indépendants, rien de ce qui est reçu ne se perd.</p>
+      </div>
+      <ul class="plain">
+        <li><strong>Une coupure ne fait perdre que le bloc en cours</strong>, 8 Mio au plus. Un bloc coupé ne laisse rien chez MEGA, et on le renvoie simplement sous le même nom (testé le 15/10).</li>
+        <li>Le téléphone garde la liste des blocs reçus. Après un redémarrage, il demande au serveur les blocs présents chez MEGA et n'envoie que les manquants.</li>
+        <li>La taille d'un bloc est un multiple exact de celle d'un bloc chiffré. Un bloc se lit et se déchiffre donc seul, ce qui servira plus tard à regarder une vidéo pendant son téléchargement.</li>
+        <li>Les transferts tournent dans un service Android au premier plan, avec une notification et un bouton « Suspendre ». Le paquet <code>background_downloader</code> (gratuit, libre) sait envoyer et télécharger en arrière-plan avec reprise. Il est à évaluer au lot 0 face à un service écrit à la main.</li>
+        <li>Les adresses signées valent 24 heures et se renouvellent à la demande. Un envoi abandonné depuis 48 heures est annulé par le serveur et sa place libérée (section 08).</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">04</span></div>
+    <div class="col">
+      <h2>La question de la compression</h2>
+      <p>À chaque dépôt de photos, vidéos ou audios, une feuille s'ouvre avec deux choix et la taille de chacun. L'inscrit voit ce qu'il gagne ou ce qu'il consomme avant de décider.</p>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Choix</th><th>Ce que voit l'inscrit</th><th>Effet</th></tr></thead>
+          <tbody>
+            <tr><td>Qualité d'origine <span class="chip ok">présélectionné</span></td><td>« Qualité d'origine · 840 Mo »</td><td>Le fichier part tel quel. C'est le choix coché par défaut : il remplit l'espace plus vite, ce que recherche l'offre.</td></tr>
+            <tr><td>Compressé</td><td>« Compressé · environ 290 Mo · 550 Mo économisés »</td><td>Le fichier est compressé sur le téléphone avant l'envoi. La taille affichée est une estimation, et la taille réelle s'affiche dans le coffre une fois le fichier arrivé.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Une case « Retenir mon choix » évite la question aux dépôts suivants. Le choix se change dans les réglages du coffre. Les documents ne sont jamais compressés : un PDF ou un fichier Office l'est déjà, et le recompresser sur le téléphone gagne peu pour un risque d'abîmer le fichier.</p>
+      <h3>Réglages de compression proposés pour le coffre</h3>
+      <p>Le coffre garde des fichiers qu'on veut conserver. Sa compression est donc plus douce que celle des discussions, mais elle réutilise les mêmes outils déjà écrits (<code>image_upload_compressor.dart</code>, <code>video_upload_compressor.dart</code> avec Media3) avec un profil « coffre ».</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Famille</th><th>Discussion (actuel)</th><th>Coffre, compressé</th><th>Estimation affichée</th></tr></thead>
+          <tbody>
+            <tr><td>Photo</td><td>Compression automatique des discussions</td><td>Côté long 3 000 px, JPEG qualité 85, métadonnées de prise de vue gardées</td><td>Taux moyen observé, environ ÷ 3</td></tr>
+            <tr><td>Vidéo</td><td>720p, H.264 ou HEVC selon les appareils</td><td>1080p, H.264 environ 5 Mbit/s, AAC 128 kbit/s</td><td>Durée × débit</td></tr>
+            <tr><td>Audio</td><td>Vocaux AAC 32 kbit/s mono</td><td>AAC 128 kbit/s stéréo, seulement si la source est plus lourde (WAV, FLAC)</td><td>Durée × débit</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>La vidéo reste en H.264 dans le coffre : un fichier transmis à un autre inscrit (section 07) doit se lire sur son téléphone, quel qu'il soit.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">05</span></div>
+    <div class="col">
+      <h2>Chiffré par le téléphone</h2>
+      <p>MEGA S4 ne chiffre pas les fichiers de son côté (vérifié dans sa documentation et par le test du 14/10). Le téléphone les chiffre donc avant de les envoyer, et MEGA ne reçoit que des octets illisibles.</p>
+      <ul class="plain">
+        <li><strong>Une clé par fichier</strong>, tirée au hasard par le téléphone.</li>
+        <li><strong>Chiffrement par blocs en flux</strong>, AES-256-GCM. Un fichier de 1 Go ne se charge jamais entier en mémoire, et la vidéo pourra plus tard se lire pendant le téléchargement. La branche <code>chiffrement-messages</code> de l'application a déjà ce mécanisme (<code>media_cipher_service.dart</code>, format <code>E2C1</code>, blocs de 1 Mio), et le chapitre 23 de la documentation E2EE en décrit un voisin (<code>AGB1</code>, blocs de 64 Kio). Le coffre reprendra le format qui sera retenu à la fusion de cette branche, sans en attendre la fusion pour avancer.</li>
+        <li><strong>La clé du fichier est gardée par le serveur</strong>, chiffrée sous une clé maîtresse <code>SAFEBOX_KEY</code> posée dans le <code>.env</code> et jamais en base, comme <code>VAULT_KEY</code> pour les pièces d'identité. L'inscrit retrouve donc son coffre sur un nouveau téléphone sans rien avoir à retenir. C'est aussi ce qui permet de copier un fichier reçu dans son propre coffre (section 07).</li>
+      </ul>
+      <div class="callout">
+        <div class="lbl">Ce que ce chiffrement protège, et ce qu'il ne protège pas</div>
+        <p>MEGA, ou quelqu'un qui volerait les clés du bucket, ne peut rien lire. Alanya, en revanche, peut techniquement déchiffrer un fichier, puisque le serveur garde les clés. C'est le même choix que pour la sauvegarde sur Drive. La politique de confidentialité doit le dire en ces termes et ne pas parler de chiffrement de bout en bout.</p>
+        <p>Un coffre dont seul l'inscrit aurait la clé est possible plus tard, mais un téléphone perdu sans code de récupération ferait perdre tout le coffre. Pour des documents importants, c'est un risque plus grave que celui qu'il écarte. Décision du 15/10 : le serveur garde les clés.</p>
+      </div>
+      <p>Perdre <code>SAFEBOX_KEY</code> rend tous les coffres illisibles. Elle doit être sauvegardée hors du serveur dès sa création, avec les autres secrets, et ne jamais changer sans un script qui rechiffre les clés des fichiers.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">06</span></div>
+    <div class="col">
+      <h2>L'espace et son compteur</h2>
+      <p>L'espace de base vaut 10 Go (10 Gio, soit 10 737 418 240 octets). C'est un réglage de l'admin, pas une constante du code : on doit pouvoir le baisser pour les nouveaux comptes si les coûts l'exigent.</p>
+      <p>Un abonné Alanya Plus a davantage d'espace (décision du 15/10). Chaque plan Plus porte son espace, réglable par l'admin : 50 Go au total (décision du 15/10).</p>
+      <h3>Ce qui compte dans l'espace</h3>
+      <ul class="plain">
+        <li>Les octets réellement stockés : après compression et chiffrement, aperçu compris. Le surcoût du chiffrement est négligeable (16 octets par bloc).</li>
+        <li>La corbeille, tant qu'elle n'est pas vidée.</li>
+        <li>Les fichiers envoyés à d'autres inscrits, puisqu'ils restent dans le coffre de l'expéditeur.</li>
+        <li>Les fichiers reçus que le destinataire enregistre dans son propre coffre.</li>
+        <li>Les envois en cours, par leur réservation.</li>
+      </ul>
+      <p>Un fichier simplement téléchargé sur le téléphone ne compte pas : il ne coûte rien en stockage.</p>
+      <h3>Ce que voit l'inscrit</h3>
+      <ul class="plain">
+        <li>Une barre en tête du coffre, « 7,4 Go utilisés sur 10 Go », détaillée par dossier racine et par corbeille.</li>
+        <li>Une notification à 80 %, 95 % et 100 %, avec un bouton vers Alanya Plus et un autre vers « Libérer de l'espace ».</li>
+        <li>« Libérer de l'espace » : les plus gros fichiers d'abord, les fichiers déjà envoyés à d'autres, la corbeille.</li>
+        <li>Coffre plein : le dépôt s'arrête avec l'offre Alanya Plus. Lire, télécharger, supprimer et envoyer un fichier déjà présent restent possibles.</li>
+      </ul>
+      <h3>Fin d'Alanya Plus avec un coffre au-dessus de 10 Go</h3>
+      <p>Décision du 15/10 : on garde le délai commun du module d'abonnement, 30 jours (<code>billing_settings.retention_days</code>).</p>
+      <ul class="plain">
+        <li>Dès l'échéance, le coffre passe en lecture seule : l'inscrit peut encore lire, télécharger, supprimer et envoyer ses fichiers, mais plus en déposer.</li>
+        <li>La notification d'avant-purge existante (<code>purgeWarning</code>) le prévient. Son texte, qui cite aujourd'hui les trajets et les sonneries par liste, citera aussi le coffre.</li>
+        <li>30 jours après l'échéance, s'il n'a ni repris Plus ni libéré de place, le serveur supprime ce qui dépasse 10 Go, en commençant par les fichiers les plus récents. Ses fichiers les plus anciens restent.</li>
+      </ul>
+      <h3>Phase gratuite</h3>
+      <p>Tant que l'interrupteur du payant est éteint, tout le monde a 10 Go et personne ne paie Plus. Comme pour la conservation des médias, c'est une règle à part : <code>decideEntitlements</code> ouvre toutes les fonctionnalités payantes à tous hors phase payante, ce qui donnerait un espace illimité. Le calcul de l'espace ne doit donc pas passer par le catalogue des fonctionnalités.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">07</span></div>
+    <div class="col">
+      <h2>Envoyer un gros fichier à un inscrit</h2>
+      <p>Les médias de discussion s'arrêtent à 100 Mo (200 Mo abonné) et expirent après 30 ou 365 jours. Un fichier plus gros passe par le coffre, par un chemin séparé : pas de R2, pas de purge des médias, pas de limite de 100 Mo.</p>
+      <ol class="steps">
+        <li><div class="step"><p><strong>Départ.</strong> Depuis une discussion, l'entrée « Fichier volumineux » du menu des pièces jointes. L'application la propose aussi d'elle-même quand un fichier dépasse la limite des médias de discussion. Depuis le coffre, le bouton « Envoyer dans une discussion » sur un fichier.</p></div></li>
+        <li><div class="step"><p><strong>Le fichier entre d'abord dans le coffre de l'expéditeur</strong>, s'il n'y est pas déjà, avec la question de compression. Il consomme son espace. Il atterrit dans le dossier racine de sa famille, et l'expéditeur peut choisir un sous-dossier.</p></div></li>
+        <li><div class="step"><p><strong>Un message « fichier du coffre »</strong> part dans la discussion : nom, taille, type, mini-image floue de l'aperçu, et un identifiant de partage. Le serveur enregistre le partage (fichier, discussion, message).</p></div></li>
+        <li><div class="step"><p><strong>Le destinataire voit une carte</strong> avec l'aperçu du fichier (ci-dessous) et deux boutons : « Télécharger » et « Enregistrer dans mon coffre ».</p></div></li>
+        <li><div class="step"><p><strong>Télécharger.</strong> Le serveur vérifie que le demandeur est membre de la discussion maintenant, que le partage et le fichier existent, et que la limite de téléchargements n'est pas atteinte. Il renvoie une adresse signée valable 15 minutes et la clé du fichier. Le téléchargement reprend après une coupure par requêtes <code>Range</code> (testé le 14/10) et redemande une adresse si elle a expiré. Le fichier déchiffré va dans <code>Téléchargements/Alanya</code>.</p></div></li>
+        <li><div class="step"><p><strong>Enregistrer dans mon coffre.</strong> Rien n'est copié chez MEGA : le fichier du destinataire désigne les mêmes blocs que celui de l'expéditeur. C'est instantané, quelle que soit la taille, et MEGA ne stocke le fichier qu'une fois. Le fichier compte pourtant dans l'espace de chacun des deux. Les blocs ne sont supprimés chez MEGA que lorsque plus aucun coffre ne les désigne. La copie survit donc à la suppression par l'expéditeur.</p></div></li>
+        <li><div class="step"><p><strong>L'expéditeur supprime lui-même.</strong> Rien ne s'efface automatiquement. Dans son coffre, un fichier partagé porte un badge « Envoyé · téléchargé 3 fois sur 4 destinataires » pour l'aider à décider. Dès qu'il le supprime, la carte affiche « Fichier retiré par l'expéditeur » et les téléchargements sont refusés.</p></div></li>
+      </ol>
+      <h3>L'aperçu dans la carte</h3>
+      <p>Le destinataire voit ce qu'il reçoit avant de télécharger quoi que ce soit (demande du 15/10). C'est le téléphone de l'expéditeur qui prépare l'aperçu au moment du dépôt : il a le fichier en clair sous la main, alors que le serveur devrait télécharger 1 Go chez MEGA pour en tirer une image.</p>
+
+      <figure>
+        <svg viewBox="0 0 760 300" role="img" aria-labelledby="fig2t">
+          <title id="fig2t">Deux cartes « fichier du coffre » telles que les voit le destinataire : une vidéo avec son image et sa durée, un PDF avec sa première page</title>
+          <rect x="20" y="14" width="340" height="272" rx="6" class="d-box"/>
+          <rect x="32" y="26" width="316" height="150" rx="3" class="d-box-keep"/>
+          <circle cx="190" cy="101" r="24" class="d-box"/>
+          <path d="M182,89 L182,113 L202,101 z" class="m-ink"/>
+          <rect x="286" y="148" width="54" height="20" rx="2" class="d-box"/>
+          <text x="313" y="162" text-anchor="middle" class="d-txt-m">12:47</text>
+          <rect x="40" y="34" width="60" height="20" rx="2" class="d-box"/>
+          <text x="70" y="48" text-anchor="middle" class="d-txt-s">1080p</text>
+          <text x="32" y="202" class="d-txt-b">Mariage_2026.mp4</text>
+          <text x="32" y="222" class="d-txt-s">840 Mo · vidéo · fichier du coffre</text>
+          <rect x="32" y="238" width="108" height="34" rx="3" class="d-box-keep"/>
+          <text x="86" y="259" text-anchor="middle" class="d-txt-keep">Télécharger</text>
+          <rect x="148" y="238" width="200" height="34" rx="3" class="d-box"/>
+          <text x="248" y="259" text-anchor="middle" class="d-txt-s">Enregistrer dans mon coffre</text>
+
+          <rect x="400" y="14" width="340" height="272" rx="6" class="d-box"/>
+          <rect x="412" y="26" width="316" height="150" rx="3" class="d-box-keep"/>
+          <rect x="520" y="34" width="100" height="134" class="d-box"/>
+          <line x1="534" y1="54" x2="606" y2="54" class="d-line"/>
+          <line x1="534" y1="70" x2="596" y2="70" class="d-life"/>
+          <line x1="534" y1="82" x2="606" y2="82" class="d-life"/>
+          <line x1="534" y1="94" x2="586" y2="94" class="d-life"/>
+          <line x1="534" y1="106" x2="606" y2="106" class="d-life"/>
+          <line x1="534" y1="118" x2="600" y2="118" class="d-life"/>
+          <line x1="534" y1="148" x2="572" y2="148" class="d-line"/>
+          <rect x="672" y="148" width="48" height="20" rx="2" class="d-box"/>
+          <text x="696" y="162" text-anchor="middle" class="d-txt-m">4 p.</text>
+          <text x="412" y="202" class="d-txt-b">Acte_de_naissance.pdf</text>
+          <text x="412" y="222" class="d-txt-s">2,4 Mo · PDF · fichier du coffre</text>
+          <rect x="412" y="238" width="108" height="34" rx="3" class="d-box-keep"/>
+          <text x="466" y="259" text-anchor="middle" class="d-txt-keep">Télécharger</text>
+          <rect x="528" y="238" width="200" height="34" rx="3" class="d-box"/>
+          <text x="628" y="259" text-anchor="middle" class="d-txt-s">Enregistrer dans mon coffre</text>
+        </svg>
+        <figcaption>Maquette de principe, pas de l'interface finale. Une fois le fichier téléchargé, « Télécharger » devient « Ouvrir ». Pendant le téléchargement, le bouton montre la progression.</figcaption>
+      </figure>
+
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Famille</th><th>Aperçu dans la carte</th></tr></thead>
+          <tbody>
+            <tr><td>Photo</td><td>La photo elle-même, nette, environ 480 px</td></tr>
+            <tr><td>Vidéo</td><td>Une image de la vidéo, sa durée et sa définition</td></tr>
+            <tr><td>PDF</td><td>La première page et le nombre de pages</td></tr>
+            <tr><td>Audio</td><td>La pochette si le fichier en a une, sinon une icône ; titre, artiste et durée tirés des métadonnées</td></tr>
+            <tr><td>Autres documents</td><td>Word, Excel, PowerPoint, ZIP, APK… : une icône du type avec l'extension. Le téléphone ne sait pas dessiner le contenu de ces fichiers</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="plain">
+        <li><strong>Deux niveaux d'aperçu.</strong> Une mini-image floue d'environ 32 px (2 Ko) voyage dans le message : la carte s'affiche tout de suite, même hors connexion. L'aperçu net d'environ 480 px (40 Ko) est rangé chiffré à côté du fichier chez MEGA et se charge par la route du partage.</li>
+        <li>Charger l'aperçu ne compte pas dans la limite de téléchargements. L'aperçu compte dans l'espace de l'expéditeur, pour quelques dizaines de Ko.</li>
+        <li>Quand l'expéditeur supprime le fichier, son aperçu net part avec lui. La carte garde la mini-image floue et affiche « Fichier retiré par l'expéditeur ».</li>
+      </ul>
+
+      <h3>Garde-fous</h3>
+      <ul class="plain">
+        <li><strong>Pas de lien public.</strong> Seuls les membres de la discussion peuvent télécharger, avec leur session Alanya. Un membre qui quitte un groupe perd l'accès.</li>
+        <li><strong>Limite de téléchargements</strong>, réglable par l'admin : 3 par destinataire et par fichier sur 24 heures. Sans elle, un fichier de 1 Go dans un groupe de 200 membres peut coûter 200 Go de sortie de données.</li>
+        <li><strong>Taille maximale</strong> d'un fichier du coffre : 1 Go pour tous (décision du 15/10). Un second réglage, la taille maximale des abonnés Alanya Plus, existe dès le départ et vaut aussi 1 Go : l'admin pourra la relever sans nouvelle version de l'application.</li>
+        <li><strong>Signalement.</strong> Un destinataire peut signaler le fichier par le module de signalement existant. Comme le serveur détient la clé, la modération peut l'ouvrir.</li>
+      </ul>
+      <div class="note-box">
+        <div class="lbl">Pourquoi la clé ne voyage pas dans le message</div>
+        <p>Le serveur garde déjà la clé (section 05). La remettre lui-même au destinataire autorisé fait fonctionner le partage dans toutes les discussions, chiffrées ou non, sans dépendre de la fusion de la branche <code>chiffrement-messages</code>. Le jour où le coffre deviendrait chiffré de bout en bout, la clé passerait dans l'enveloppe du message, comme pour les médias chiffrés.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">08</span></div>
+    <div class="col">
+      <h2>Corbeille et ménage</h2>
+      <p>S4 n'a ni versions ni règles de cycle de vie : le test du 14/10 a reçu « 501 NotImplemented » pour les deux. Une suppression chez MEGA est donc définitive, et aucune purge automatique ne tourne de son côté. Tout le ménage revient au backend.</p>
+      <h3>Une corbeille de 30 jours</h3>
+      <p>Supprimer un fichier ou un dossier l'envoie à la corbeille, d'où l'inscrit peut le restaurer pendant 30 jours. La corbeille compte dans l'espace : elle protège des erreurs sans offrir d'espace gratuit en plus. « Vider la corbeille » supprime tout de suite chez MEGA.</p>
+      <h3>Les purges du coffre</h3>
+      <p>Elles s'inscrivent dans le registre des purges existant (<code>purgeRegistry.js</code>), avec son historique et ses boutons dans Admin › Purges. La purge de l'espace dépassé reprend le garde-fou de la purge des médias : elle s'arrête et prévient l'admin si une nuit veut supprimer beaucoup plus que d'habitude.</p>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Purge</th><th>Ce qu'elle supprime</th><th>Quand</th></tr></thead>
+          <tbody>
+            <tr><td>Corbeille</td><td>Les fichiers mis à la corbeille ; leurs blocs chez MEGA si plus aucun autre coffre ne les désigne</td><td>30 jours après</td></tr>
+            <tr><td>Envois abandonnés</td><td>Les blocs d'un envoi jamais terminé, et sa réservation</td><td>48 heures sans nouveau bloc</td></tr>
+            <tr><td>Comptes supprimés</td><td>Tout le coffre du compte et ses partages. Les blocs encore désignés par le coffre d'un autre inscrit restent</td><td>Au terme du délai de suppression de compte actuel</td></tr>
+            <tr><td>Espace dépassé</td><td>Ce qui dépasse 10 Go après la fin d'Alanya Plus, les fichiers les plus récents d'abord</td><td>30 jours après l'échéance, après la notification <code>purgeWarning</code> (section 06)</td></tr>
+            <tr><td>Orphelins</td><td>Les objets présents chez MEGA sans ligne en base, et l'inverse, signalé à l'admin</td><td>Une fois par semaine, en lisant le bucket</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Aucune purge des comptes inactifs</strong> (décision du 15/10) : un coffre est gardé sans limite de durée, même si son propriétaire n'ouvre plus Alanya. La règle pourra être revue plus tard si les coûts l'exigent.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">09</span></div>
+    <div class="col">
+      <h2>Ce que ça coûte, ce que ça rapporte</h2>
+      <div class="callout">
+        <div class="lbl">Prix estimé</div>
+        <p>Le site de MEGA n'a pas pu être consulté (ni le 14/10, ni aujourd'hui). Les chiffres ci-dessous viennent d'un forum et de copies non officielles des pages de MEGA : environ <strong>2,50 € par To et par mois</strong>, sortie de données comprise jusqu'à <strong>5 fois le volume stocké</strong> par mois sous réserve d'usage raisonnable, aucun coût par requête, et une offre d'entrée de 3 To à 15 € par mois. Le coffre-fort est une demande de la hiérarchie : l'usage de MEGA S4 est donc validé. Ces chiffres restent des estimations tant que l'offre souscrite et son prix n'ont pas été relevés dans le compte MEGA.</p>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Cas</th><th class="num">Volume</th><th class="num">Coût par mois</th><th class="num">En XAF</th></tr></thead>
+          <tbody>
+            <tr><td>Un compte gratuit plein</td><td class="num">10 Go</td><td class="num">0,025 €</td><td class="num">≈ 16</td></tr>
+            <tr><td>1 000 comptes gratuits pleins</td><td class="num">10 To</td><td class="num">25 €</td><td class="num">≈ 16 400</td></tr>
+            <tr><td>Un abonné Plus plein, à 50 Go</td><td class="num">50 Go</td><td class="num">0,125 €</td><td class="num">≈ 82</td></tr>
+            <tr><td>Un abonné Plus plein, à 100 Go</td><td class="num">100 Go</td><td class="num">0,25 €</td><td class="num">≈ 164</td></tr>
+            <tr><td>Un abonné Plus plein, à 150 Go</td><td class="num">150 Go</td><td class="num">0,375 €</td><td class="num">≈ 246</td></tr>
+            <tr><td>Offre d'entrée MEGA, si c'est la nôtre</td><td class="num">3 To</td><td class="num">15 €</td><td class="num">≈ 9 840</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>L'espace payant est vendu avec Alanya Plus (décision du 15/10). Dans le catalogue de départ, Plus coûte 250 XAF par mois, ou 2 000 XAF par an, soit environ 167 XAF par mois. Un abonné annuel qui remplit son coffre coûte donc plus qu'il ne paie au-delà d'environ <strong>100 Go</strong>, et le mensuel au-delà d'environ <strong>150 Go</strong>. Cela avant les frais du paiement mobile et les autres avantages de Plus (médias gardés 365 jours, fichiers de 200 Mo). D'où les 50 Go retenus avec Plus (décision du 15/10), qui gardent de la marge même pour un abonné qui remplit tout.</p>
+      <h3>Ce qui limite la dépense</h3>
+      <ul class="plain">
+        <li><strong>Le serveur ne relaie aucun octet.</strong> Envois et téléchargements vont directement entre le téléphone et MEGA : pas de bande passante du VPS, pas de serveur plus gros à prévoir.</li>
+        <li><strong>L'espace gratuit est plafonné et réglable.</strong> Le pire cas est connu : 10 Go par compte gratuit, et la plupart n'en rempliront qu'une partie. Les coffres étant gardés sans limite de durée, même inactifs, cette dépense grandit avec le nombre d'inscrits : le réglage de l'espace de base est le levier pour la contenir sur les nouveaux comptes.</li>
+        <li><strong>La sortie de données est bornée</strong> par la limite de téléchargements des fichiers partagés (section 07).</li>
+        <li><strong>Un fichier enregistré par plusieurs inscrits n'est stocké qu'une fois</strong> chez MEGA (section 07), alors qu'il compte dans l'espace de chacun.</li>
+        <li><strong>Pas de développement nouveau là où il existe déjà</strong> : compression, chiffrement par blocs, paiement mobile, registre des purges, module de signalement.</li>
+      </ul>
+      <h3>Ce qui pousse vers Alanya Plus</h3>
+      <ul class="plain">
+        <li>La qualité d'origine cochée par défaut (section 04).</li>
+        <li>Les gros fichiers envoyés, qui restent sur l'espace de l'expéditeur jusqu'à ce qu'il les supprime.</li>
+        <li>« Enregistrer dans mon coffre », qui consomme l'espace du destinataire.</li>
+        <li>La corbeille comptée dans l'espace.</li>
+        <li>Les alertes à 80, 95 et 100 %, qui mènent toutes à l'offre.</li>
+      </ul>
+      <h3>L'espace dans le module d'abonnement</h3>
+      <p>Comme l'espace vient avec Plus, il n'y a ni produit ni période à créer : la table <code>plan</code> reçoit une colonne <code>safebox_bytes</code>, l'espace que donne chaque plan. Les deux plans actuels, mensuel et annuel, reçoivent la même valeur. Le calcul est celui des autres avantages de Plus (<code>isPaidTier</code>) : en phase payante, un compte couvert ou exempté (équipe, compte officiel) a l'espace de son plan, les autres ont 10 Go. Si un jour on veut plusieurs niveaux, par exemple Plus 50 Go et Plus 200 Go, ce seront de nouveaux plans avec leur prix et leur espace, sans nouveau code.</p>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">10</span></div>
+    <div class="col">
+      <h2>Tables, routes et réglages</h2>
+      <p>Les migrations partent de <code>101</code> : la dernière sur <code>origin/main</code> est <code>100_pref_contact_custom_name.sql</code>. À revérifier avant de numéroter, <code>main</code> avance vite.</p>
+<pre><span class="c">-- Lot 1, migration 101_safebox.sql (codée)</span>
+<span class="k">safebox_settings</span>     une ligne : espace de base, taille max (standard, Plus), profondeur,
+                     nombre de dossiers, extensions par famille (JSON, NULL = celles du code)
+<span class="k">safebox_account</span>      alanyaID — coffre ouvert ; verrou des réservations d'espace
+<span class="k">safebox_folder</span>       id, alanyaID, parent_id, root, root_slot, name, path (/racine/…/id/), depth,
+                     trashed_at, trashed_by_folder, name_key (nom unique parmi les frères vivants)
+<span class="k">safebox_blob</span>         id, alanyaID (qui l'a envoyé), prefix (u/&lt;empreinte&gt;/&lt;uuid&gt;/), block_size,
+                     block_count, stored_bytes, plain_bytes, preview_bytes, cipher_format,
+                     wrapped_key, status (pending|ready|deleting), activity_at
+                     <span class="c">(les blocs chez MEGA ; orphelin = plus aucun fichier ne le désigne)</span>
+<span class="k">safebox_file</span>         id, alanyaID, folder_id, blob_id, name, ext, mime, family,
+                     original_bytes, compressed, trashed_at, trashed_by_folder
+<span class="c">-- Plus tard</span>
+<span class="k">safebox_share</span>        lot 3 : id, file_id, conversation_id, message_id, sender_id, revoked_at
+<span class="k">safebox_download</span>     lot 3 : share_id, alanyaID, day, count
+<span class="k">plan</span>                 lot 4 : + safebox_bytes   <span class="c">(espace donné par le plan Plus)</span>
+
+<span class="c">-- Routes, préfixe /api/safebox (authentifiées) — lot 1 codé</span>
+GET    /                         ouvre le coffre : espace, dossiers racines, limites
+GET    /folders/:id              contenu (sous-dossiers, puis fichiers par pages de 100)
+POST   /folders                  créer un sous-dossier
+PATCH  /folders/:id              renommer, déplacer dans la même famille
+DELETE /folders/:id              à la corbeille, avec le contenu
+POST   /folders/:id/restore      sortir de la corbeille
+POST   /uploads                  réserver l'espace ; taille des blocs et premières adresses signées
+GET    /uploads/:id/blocks       blocs déjà reçus chez MEGA, pour reprendre
+POST   /uploads/:id/blocks       adresses de blocs choisis (suivants ou expirés)
+POST   /uploads/:id/complete     vérifier les blocs chez MEGA, ranger la clé
+DELETE /uploads/:id              abandonner, libérer la réservation
+GET    /files/:id/download       clé + adresses de tous les blocs, 15 min
+PATCH  /files/:id                renommer, déplacer
+DELETE /files/:id                à la corbeille
+POST   /files/:id/restore        sortir de la corbeille
+GET    /trash                    contenu de la corbeille et date de départ de chaque élément
+DELETE /trash                    vider la corbeille (supprimé tout de suite chez MEGA)
+DELETE /trash/files/:id          supprimer définitivement un fichier
+DELETE /trash/folders/:id        supprimer définitivement un dossier et son contenu
+<span class="c">-- Lot 3</span>
+POST   /shares                   partager un fichier dans une discussion
+GET    /shares/:id/download      clé + adresses des blocs, 15 min (membre de la discussion)
+POST   /shares/:id/save          enregistrer dans mon coffre (mêmes blocs, aucune copie)
+
+<span class="c">-- Réglages .env</span>
+MEGA_S4_ENDPOINT  MEGA_S4_BUCKET=safebox  MEGA_S4_KEY_ID  MEGA_S4_SECRET  MEGA_S4_REGION
+SAFEBOX_KEY       <span class="c"># 32 octets en base64, clé maîtresse des clés de fichiers</span>
+
+<span class="c">-- Purge « safebox » (Admin › Purges), réglages</span>
+durée de la corbeille (30 j), envoi abandonné après (48 h), seuil d'arrêt (5 000 fichiers par nuit)</pre>
+      <p>Côté admin : une page « Coffre-fort » avec le volume total stocké, le nombre de coffres, les plus gros consommateurs, les téléchargements de fichiers partagés sur 30 jours et les réglages ci-dessus. Côté application : une entrée « Coffre-fort » dans le menu principal, le coffre lui-même (liste et grille, tri par nom, date, taille), la feuille de compression, les transferts en cours, la corbeille, la carte « fichier du coffre » dans les discussions.</p>
+      <p><strong>Client web</strong> : S4 ne gère pas le CORS (501 au test du 14/10), un navigateur ne peut donc ni envoyer ni télécharger directement chez MEGA. Un coffre sur le web obligerait le serveur à relayer les fichiers, avec la bande passante que cela coûte. Décision du 15/10 : le coffre est dans l'application mobile seulement. Le web n'a pas d'entrée « Coffre-fort », et la carte « fichier du coffre » y affiche « À ouvrir dans l'application mobile ».</p>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">11</span></div>
+    <div class="col">
+      <h2>Ordre de travail</h2>
+      <ol class="steps">
+        <li><div class="step"><p><strong>Lot 0 · vérifier S4 avant d'écrire le coffre</strong> <span class="chip ok">fait le 15/10</span></p><p class="sub">Script <code>npm run smoke:mega-s4:lot0</code> (<code>scripts/dev/mega-s4-lot0.js</code>), 5 étapes sur 5 réussies sur <code>safebox</code> : bloc coupé sans trace, renvoi sous le même nom, comptage des blocs, lecture coupée puis reprise par <code>Range</code>, bloc trop gros refusé (403). Il a aussi montré que l'envoi en morceaux de S3 perd tout après certaines coupures, d'où les blocs indépendants (section 03). Restent pour le lot 2 : de vraies coupures sur un téléphone en données mobiles, et le choix entre <code>background_downloader</code> et un service écrit à la main. À relever quand ce sera possible : l'offre MEGA et son prix, pour remplacer les estimations de la section 09.</p></div></li>
+        <li><div class="step"><p><strong>Lot 1 · backend du coffre</strong> <span class="chip ok">codé le 15/10</span></p><p class="sub">Migration <code>101_safebox.sql</code>, <code>src/services/safebox/</code> (règles, clés, stockage S4, réglages, service, purge), routes <code>/api/safebox</code>, purge <code>safebox</code> au registre et au balayage de nuit, 16 codes d'erreur au catalogue. Tests : <code>npm run test:safebox</code> (29, sans base, ajoutés à la CI) et <code>npm run test:safebox:db</code> (14 étapes contre une base jetable, jamais la production). Migration 101 appliquée en production le 15/10 (outil <code>scripts/maintenance/migration-distante.js</code>, la base n'acceptant que le VPS). Reste avant la mise en service : poser <code>MEGA_S4_*</code> et <code>SAFEBOX_KEY</code> sur le serveur, sauvegarder <code>SAFEBOX_KEY</code> hors du serveur, déployer le code. Plus tard : le rapprochement hebdomadaire des objets MEGA sans ligne en base (section 08).</p></div></li>
+        <li><div class="step"><p><strong>Lot 2 · le coffre dans l'application</strong></p><p class="sub">Écrans, feuille de compression, chiffrement par blocs, transferts en arrière-plan avec reprise, aperçus, téléchargement, corbeille, barre d'espace et alertes.</p></div></li>
+        <li><div class="step"><p><strong>Lot 3 · gros fichiers entre inscrits</strong></p><p class="sub">Partages, nouveau type de message et sa carte avec aperçu, téléchargement par les membres, « Enregistrer dans mon coffre », limite de téléchargements, signalement.</p></div></li>
+        <li><div class="step"><p><strong>Lot 4 · l'espace avec Alanya Plus</strong></p><p class="sub">Colonne <code>plan.safebox_bytes</code>, calcul de l'espace, lecture seule à l'échéance, purge de l'excédent à 30 jours, texte de <code>purgeWarning</code> et alertes d'espace en 3 langues.</p></div></li>
+        <li><div class="step"><p><strong>Lot 5 · admin</strong></p><p class="sub">Page Coffre-fort, réglages, espace de chaque plan dans la page des plans, cartes de purge.</p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════ -->
+  <section class="band">
+    <div class="gutter"><span class="num">12</span></div>
+    <div class="col">
+      <h2>Décisions du 15/10/2026</h2>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Sujet</th><th>Décision</th></tr></thead>
+          <tbody>
+            <tr><td>Carte du destinataire</td><td>Elle montre un aperçu du fichier reçu (section 07).</td></tr>
+            <tr><td>1 · Fin d'Alanya Plus</td><td>Délai commun de 30 jours : lecture seule, puis suppression de ce qui dépasse 10 Go (section 06).</td></tr>
+            <tr><td>2 · Photo d'un document</td><td>La famille se décide par l'extension : .jpg ou .heic dans « albums », .pdf ou .tiff dans « documents » (section 02).</td></tr>
+            <tr><td>3 · Clés de chiffrement</td><td>Gardées par le serveur (section 05).</td></tr>
+            <tr><td>4 · Gros fichiers</td><td>1 Go pour tous, groupes compris, 3 téléchargements par destinataire et par 24 heures. La taille pourra être relevée pour les abonnés Plus.</td></tr>
+            <tr><td>5 · Espace payant</td><td>Vendu avec Alanya Plus, pas à part (section 09).</td></tr>
+            <tr><td>6 · Client web</td><td>Coffre dans l'application mobile seulement. Sur le web, la carte affiche « À ouvrir dans l'application mobile ».</td></tr>
+            <tr><td>7 · Buckets</td><td>Un seul bucket, <code>safebox</code>. <code>album</code> sera supprimé s'il ne sert à rien d'autre.</td></tr>
+            <tr><td>8 · Comptes inactifs</td><td>Aucune purge : les données du coffre sont gardées sans limite de durée. À revoir plus tard si nécessaire.</td></tr>
+            <tr><td>Envoi des fichiers</td><td>En blocs indépendants de 8 Mio, après le lot 0 (section 03). Un fichier enregistré par un destinataire partage les blocs de l'expéditeur (section 07).</td></tr>
+            <tr><td>A · Espace avec Plus</td><td>50 Go au total, réglable par plan dans l'admin (section 09).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>L'usage de MEGA S4 est validé : le coffre-fort est une demande de la hiérarchie. Lot 0 fait ; prochaine étape : le lot 1, le backend du coffre (section 11).</p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

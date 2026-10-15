@@ -206,6 +206,8 @@ const _purgeUser = async (alanyaID) => {
       [alanyaID],
     );
 
+    // Le coffre-fort part par cascade (tables safebox_*) ; ses fichiers chez
+    // MEGA S4 deviennent orphelins et la purge `safebox` les efface.
     await conn.execute('DELETE FROM users WHERE alanyaID = ?', [alanyaID]);
     await conn.commit();
     releasePublicFiles(fichiersPublics);

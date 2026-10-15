@@ -57,6 +57,7 @@ const welcomeRoutes      = require('./src/routes/welcome');
 const reportRoutes       = require('./src/routes/reports');
 const e2eeKeysRoutes     = require('./src/routes/e2eeKeys');
 const stickerRoutes      = require('./src/routes/stickers');
+const safeboxRoutes      = require('./src/routes/safebox');
 const qrLandingRoutes    = require('./src/routes/qrLanding');
 const legalRoutes        = require('./src/routes/legal');
 const healthRoutes       = require('./src/routes/health');
@@ -221,6 +222,7 @@ app.use('/api/welcome',       welcomeRoutes);
 app.use('/api/reports',       reportRoutes);
 app.use('/api/e2ee',          e2eeKeysRoutes);
 app.use('/api/stickers',      stickerRoutes);
+app.use('/api/safebox',       safeboxRoutes);
 app.use('/notify',            notifyRoutes);
 
 // Pages légales publiques (accueil, confidentialité, CGU, licences) —
@@ -449,6 +451,9 @@ async function start() {
         // Médias de discussion : 30 jours, ou 365 pour ceux qu'un abonné peut
         // encore demander. Supprimés chez Backblaze, message par message.
         ['media_nightly_purge',     'media'],
+        // Coffre-fort : corbeille échue, envois abandonnés, puis blocs
+        // orphelins supprimés chez MEGA S4, qui n'a pas de cycle de vie.
+        ['safebox_purge',           'safebox'],
       ];
       for (const [bail, purge] of purges) {
         withLease(bail, () => runPurgeIfEnabled(purge)).catch(
