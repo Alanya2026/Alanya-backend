@@ -527,6 +527,38 @@ function createSafeboxService({
     };
   }
 
+  /**
+   * `GET /api/safebox/largest` — les plus gros fichiers de tout le coffre,
+   * pour l'écran « Libérer de l'espace », avec ce que pèse la corbeille.
+   */
+  async function largestFiles(alanyaID, { limit } = {}) {
+    const storage = ready();
+    const n = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200);
+    const [rows] = await db.query(
+      `SELECT f.id, f.folder_id, f.name, f.ext, f.mime, f.family, f.original_bytes,
+              f.compressed, f.trashed_at, f.trashed_by_folder, f.created_at, f.updated_at,
+              b.id AS blob_id, b.prefix, b.block_size, b.block_count, b.stored_bytes,
+              b.plain_bytes, b.preview_bytes, b.cipher_format, b.wrapped_key, b.status,
+              fo.name AS folder_name
+         FROM safebox_file f
+         JOIN safebox_blob b ON b.id = f.blob_id
+         JOIN safebox_folder fo ON fo.id = f.folder_id
+        WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+        ORDER BY (b.stored_bytes + b.preview_bytes) DESC, f.id DESC
+        LIMIT ${n}`,
+      [alanyaID],
+    );
+    const { trashBytes } = await usageOf(db, alanyaID);
+    return {
+      trashBytes,
+      files: await Promise.all(rows.map(async (f) => ({
+        ...(await fileShape(f, storage)),
+        // Nul pour un dossier racine : l'application affiche son nom traduit.
+        folderName: f.folder_name,
+      }))),
+    };
+  }
+
   // ── Envois ───────────────────────────────────────────────────────────────
 
   async function signBlocks(storage, blob, numeros) {
@@ -816,6 +848,7 @@ function createSafeboxService({
     trashFile,
     restoreFile,
     downloadFile,
+    largestFiles,
     reserveUpload,
     uploadUrls,
     uploadStatus,

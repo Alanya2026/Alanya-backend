@@ -43,6 +43,7 @@ exports.updateFile = route('updateFile', (s, req) => s.updateFile(moi(req), req.
 exports.trashFile = route('trashFile', (s, req) => s.trashFile(moi(req), req.params.id));
 exports.restoreFile = route('restoreFile', (s, req) => s.restoreFile(moi(req), req.params.id));
 exports.downloadFile = route('downloadFile', (s, req) => s.downloadFile(moi(req), req.params.id));
+exports.largestFiles = route('largestFiles', (s, req) => s.largestFiles(moi(req), { limit: req.query.limit }));
 
 exports.reserveUpload = route('reserveUpload', (s, req) => s.reserveUpload(moi(req), req.body), 201);
 exports.uploadStatus = route('uploadStatus', (s, req) => s.uploadStatus(moi(req), req.params.id));

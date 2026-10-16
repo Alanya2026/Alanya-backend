@@ -166,6 +166,20 @@ router.get('/files/:id/download', auth, lecture, c.downloadFile);
 
 /**
  * @swagger
+ * /api/safebox/largest:
+ *   get:
+ *     summary: "Les plus gros fichiers du coffre (?limit=50, 200 au plus) et le poids de la corbeille — écran « Libérer de l'espace »"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "{ trashBytes, files: [{ …, folderName }] }"
+ */
+router.get('/largest', auth, lecture, c.largestFiles);
+
+/**
+ * @swagger
  * /api/safebox/trash:
  *   get:
  *     summary: Contenu de la corbeille, avec la date à laquelle chaque élément partira

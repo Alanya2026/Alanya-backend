@@ -237,6 +237,25 @@ test('lecture : liste, téléchargement, isolement', async () => {
   await refuse(svc.downloadFile(B, video.fileId), 'SAFEBOX_NOT_FOUND');
 });
 
+test('plus gros fichiers : triés par poids, avec leur dossier, d\'un seul compte', async () => {
+  const petit = await svc.reserveUpload(A, {
+    folderId: racinesA.documents, name: 'petit.pdf', size: 10, plainSize: 10, cipherFormat: 'E2C1',
+  });
+  deposer(petit);
+  await svc.completeUpload(A, petit.fileId, { key: cle.toString('base64') });
+  const r = await svc.largestFiles(A, { limit: 10 });
+  assert.deepStrictEqual(r.files.map((f) => f.name), ['Cérémonie.mp4', 'petit.pdf']);
+  assert.strictEqual(r.files[0].folderName, 'Mariage');
+  assert.strictEqual(r.files[1].folderName, null, 'racine : nom traduit par l\'application');
+  assert.strictEqual(r.trashBytes, 0);
+  assert.strictEqual((await svc.largestFiles(B)).files.length, 0);
+  assert.strictEqual((await svc.largestFiles(A, { limit: 1 })).files.length, 1);
+  await svc.trashFile(A, petit.fileId);
+  assert.strictEqual((await svc.largestFiles(A)).files.length, 1, 'la corbeille n\'est pas listée');
+  assert.ok((await svc.largestFiles(A)).trashBytes > 0);
+  await svc.emptyTrash(A);
+});
+
 test('fichiers : renommer et déplacer dans la famille seulement', async () => {
   const f = await svc.updateFile(A, video.fileId, { name: 'Cérémonie.mov' });
   assert.strictEqual(f.ext, 'mov');
