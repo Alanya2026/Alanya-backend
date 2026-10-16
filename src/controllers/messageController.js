@@ -28,6 +28,7 @@ const { MEDIA_THUMB_SELECT } = require('../utils/messageThumbSql');
 const { copyForForward } = require('../services/mediaStorage');
 const { resolveStickerFields, estSticker, sanitizeReplyContent, champsDeTransfert } = require('../utils/stickerMessage');
 const { normalizeMessageType } = require('../utils/messageType');
+const { resolveSafeboxShareFields, sanitizeShareReply } = require('../utils/safeboxShareMessage');
 
 // Même origine que celle composée à l'upload : une URL de transfert doit être
 // indiscernable d'une URL d'upload, sans quoi le client la traiterait comme
@@ -332,10 +333,17 @@ const _persistMessage = async (conn, conversationID, senderID, fields) => {
   });
   if (sticker) ({ content, mediaUrl, mediaName } = sticker);
 
+  // Fichier du coffre (type 11) : même fonction que `message:send`. Une
+  // `SafeboxShareMessageError` porte `status` et `code`, rendus tels quels.
+  const partage = await resolveSafeboxShareFields({
+    type, content, senderID, conversationID, chiffre,
+  });
+  if (partage) ({ content, mediaUrl, mediaName } = partage);
+
   const { id: resolvedReplyToID, type: replyToType } = await resolveReplyTarget(conversationID, replyToID);
   // Citation d'un sticker : libellé neutre, jamais le JSON (voir stickerMessage).
   const resolvedReplyToContent = resolvedReplyToID != null
-    ? sanitizeReplyContent(replyToContent ?? null, replyToType)
+    ? sanitizeShareReply(sanitizeReplyContent(replyToContent ?? null, replyToType), replyToType)
     : null;
 
   const mentionsValue = await sanitizeMentions(

@@ -550,6 +550,20 @@ function parsePlanPayload(body, { partial = false } = {}) {
     value[key] = src[key].trim();
   }
 
+  // Espace du coffre-fort donné par le plan (migration 103) ; null = l'espace
+  // de base. Plafonné à 100 Tio : au-delà, c'est une faute de frappe.
+  if (src.safebox_bytes !== undefined) {
+    if (src.safebox_bytes === null || src.safebox_bytes === '') {
+      value.safebox_bytes = null;
+    } else {
+      const n = toStrictInt(src.safebox_bytes);
+      if (!Number.isInteger(n) || n < 0 || n > 100 * 1024 ** 4) {
+        return bad('INVALID_PLAN', 'safebox_bytes : un nombre d\'octets entre 0 et 100 Tio, ou null');
+      }
+      value.safebox_bytes = n;
+    }
+  }
+
   if (src.features !== undefined) {
     if (!Array.isArray(src.features) || src.features.some((c) => typeof c !== 'string')) {
       return bad('INVALID_PLAN', 'features : liste de codes de fonctionnalité');

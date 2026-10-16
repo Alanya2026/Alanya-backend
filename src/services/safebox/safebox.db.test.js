@@ -16,8 +16,11 @@
  *     GRANT ALL ON *.* TO 'root'@'127.0.0.1';
  *     CREATE DATABASE talky_test; USE talky_test;
  *     CREATE TABLE users (alanyaID INT AUTO_INCREMENT PRIMARY KEY, nom VARCHAR(50));
- *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);"
- *   mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/101_safebox.sql
+ *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
+ *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
+ *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
+ *   for m in 101_safebox 102_safebox_partage; do
+ *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
  *
@@ -40,7 +43,8 @@ if (!/^(127\.0\.0\.1|localhost)$/.test(hote) || !/_test$/.test(base)) {
 const pool = require('../../config/db');
 const { createSafeboxService } = require('./service');
 const { normalize } = require('./settings');
-const { runSafeboxPurge, collectOrphans } = require('./purge');
+const { runSafeboxPurge, collectOrphans, reconcile } = require('./purge');
+const { resolveSafeboxShareFields } = require('../../utils/safeboxShareMessage');
 const { SafeboxError } = require('./errors');
 const { Mio, BLOCK_BYTES } = require('../../constants/safebox');
 
@@ -48,8 +52,17 @@ const env = { SAFEBOX_KEY: crypto.randomBytes(32).toString('base64') };
 
 function fauxStockage() {
   const objets = new Map();
+  const ages = new Map();
   return {
     objets,
+    ages,
+    listPage: async (prefix) => ({
+      objects: [...objets]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([key, size]) => ({ key, size, lastModified: ages.get(key) || new Date() })),
+      next: undefined,
+    }),
+    removeKeys: async (keys) => { for (const k of keys) objets.delete(k); },
     uploadUrl: async (key, size) => `https://s4.test/put/${key}?size=${size}`,
     downloadUrl: async (key) => `https://s4.test/get/${key}`,
     list: async (prefix) => [...objets]
@@ -71,6 +84,9 @@ const svc = createSafeboxService({
   env,
   getSettings: async () => reglages,
   trashDays: async () => 30,
+  // Pas de tables d'abonnement dans la base jetable : l'espace de base. Le
+  // calcul Alanya Plus a son propre test (plusSpace.test.js).
+  spaceFor: async (id, r) => ({ quotaBytes: r.baseQuotaBytes, maxFileBytes: r.maxFileBytes, plus: false }),
 });
 
 let ok = 0;
@@ -370,6 +386,168 @@ test('ramassage : un blob encore désigné n\'est jamais supprimé', async () =>
   assert.strictEqual((await svc.downloadFile(A, r.fileId)).blocks.length, 1);
 });
 
+// ── Lot 3 : partage entre inscrits ─────────────────────────────────────────
+let E;
+let D;
+let X;
+let conv;
+let fichierE;
+let partage;
+
+async function deposerFichier(qui, folderId, name, taille = 10) {
+  const r = await svc.reserveUpload(qui, { folderId, name, size: taille, plainSize: taille, cipherFormat: 'E2C1' });
+  deposer(r);
+  return svc.completeUpload(qui, r.fileId, { key: cle.toString('base64') });
+}
+
+test('partage : seulement un fichier à moi, dans une discussion dont je suis membre', async () => {
+  E = await compte('expediteur');
+  D = await compte('destinataire');
+  X = await compte('etranger');
+  const [c] = await pool.query('INSERT INTO conversation () VALUES ()');
+  conv = c.insertId;
+  await pool.query('INSERT INTO conv_participants (conversID, alanyaID) VALUES (?, ?), (?, ?)', [conv, E, conv, D]);
+  const racinesE = Object.fromEntries((await svc.overview(E)).roots.map((r) => [r.root, r.id]));
+  fichierE = await deposerFichier(E, racinesE.documents, 'Contrat.pdf', 20);
+  await refuse(svc.createShare(X, { fileId: fichierE.id, conversationId: conv }), 'SAFEBOX_NOT_FOUND');
+  await refuse(svc.createShare(E, { fileId: fichierE.id, conversationId: conv + 999 }), 'SAFEBOX_NOT_FOUND');
+  partage = await svc.createShare(E, { fileId: fichierE.id, conversationId: conv });
+  assert.strictEqual(partage.name, 'Contrat.pdf');
+  assert.strictEqual(partage.plainBytes, 20);
+});
+
+test('message de type 11 : contenu réécrit depuis le partage', async () => {
+  const r = await resolveSafeboxShareFields(
+    { type: 11, content: JSON.stringify({ v: 1, share: partage.shareId }), senderID: E, conversationID: conv },
+    { db: pool },
+  );
+  assert.strictEqual(JSON.parse(r.content).name, 'Contrat.pdf');
+  assert.ok(r.mediaName.startsWith('📦 Contrat.pdf'));
+  await assert.rejects(resolveSafeboxShareFields(
+    { type: 11, content: JSON.stringify({ v: 1, share: partage.shareId }), senderID: D, conversationID: conv },
+    { db: pool },
+  ), /invalide/);
+});
+
+test('carte : membres seulement, avec la clé et les téléchargements restants', async () => {
+  await refuse(svc.shareInfo(X, partage.shareId), 'SAFEBOX_NOT_FOUND');
+  const vu = await svc.shareInfo(D, partage.shareId);
+  assert.strictEqual(vu.available, true);
+  assert.strictEqual(vu.key, cle.toString('base64'));
+  assert.strictEqual(vu.downloadsLeft, 3);
+  assert.strictEqual(vu.isSender, false);
+  assert.strictEqual(vu.savedFileId, null);
+  const parE = await svc.shareInfo(E, partage.shareId);
+  assert.strictEqual(parE.isSender, true);
+  assert.strictEqual(parE.downloadsLeft, null);
+  assert.strictEqual(parE.savedFileId, fichierE.id, 'déjà dans le coffre de l\'expéditeur');
+});
+
+test('téléchargement : compté une fois par 2 h, 3 par 24 h, l\'expéditeur jamais limité', async () => {
+  const t = await svc.shareDownload(D, partage.shareId);
+  assert.strictEqual(t.blocks.length, 1);
+  assert.strictEqual(t.file.id, null, 'rien du coffre de l\'expéditeur ne sort');
+  await svc.shareDownload(D, partage.shareId); // reprise : ne compte pas
+  assert.strictEqual((await svc.shareInfo(D, partage.shareId)).downloadsLeft, 2);
+  for (let i = 0; i < 2; i += 1) {
+    await pool.query('UPDATE safebox_share_download SET created_at = DATE_SUB(created_at, INTERVAL 3 HOUR) WHERE alanyaID = ?', [D]);
+    await svc.shareDownload(D, partage.shareId);
+  }
+  await pool.query('UPDATE safebox_share_download SET created_at = DATE_SUB(created_at, INTERVAL 3 HOUR) WHERE alanyaID = ?', [D]);
+  const e = await refuse(svc.shareDownload(D, partage.shareId), 'SAFEBOX_DOWNLOAD_LIMIT');
+  assert.strictEqual(e.status, 429);
+  for (let i = 0; i < 5; i += 1) await svc.shareDownload(E, partage.shareId);
+});
+
+test('enregistrer dans mon coffre : mêmes blocs, compté chez moi, survit au retrait', async () => {
+  const avant = (await svc.usageOf(D)).usedBytes;
+  const f = await svc.saveShare(D, partage.shareId);
+  assert.strictEqual(f.family, 'documents');
+  assert.strictEqual(f.key, cle.toString('base64'));
+  assert.strictEqual((await svc.usageOf(D)).usedBytes, avant + 20);
+  const encore = await svc.saveShare(D, partage.shareId);
+  assert.strictEqual(encore.id, f.id, 'pas de doublon');
+  const [[b]] = await pool.query(
+    'SELECT COUNT(DISTINCT blob_id) AS n FROM safebox_file WHERE id IN (?, ?)', [f.id, fichierE.id]);
+  assert.strictEqual(Number(b.n), 1, 'aucune copie chez MEGA');
+  // L'expéditeur retire le fichier : la carte le dit, mais la copie du destinataire reste.
+  await svc.trashFile(E, fichierE.id);
+  assert.strictEqual((await svc.shareInfo(D, partage.shareId)).available, false);
+  await refuse(svc.shareDownload(D, partage.shareId), 'SAFEBOX_SHARE_REVOKED');
+  await svc.emptyTrash(E);
+  assert.strictEqual((await svc.downloadFile(D, f.id)).blocks.length, 1, 'les blocs sont restés pour le destinataire');
+  await refuse(svc.saveShare(X, partage.shareId), 'SAFEBOX_NOT_FOUND');
+});
+
+test('un membre qui quitte la discussion perd l\'accès', async () => {
+  const racinesE = Object.fromEntries((await svc.overview(E)).roots.map((r) => [r.root, r.id]));
+  const f = await deposerFichier(E, racinesE.documents, 'Second.pdf');
+  const p2 = await svc.createShare(E, { fileId: f.id, conversationId: conv });
+  await svc.shareInfo(D, p2.shareId);
+  await pool.query('DELETE FROM conv_participants WHERE conversID = ? AND alanyaID = ?', [conv, D]);
+  await refuse(svc.shareInfo(D, p2.shareId), 'SAFEBOX_NOT_FOUND');
+  await refuse(svc.shareDownload(D, p2.shareId), 'SAFEBOX_NOT_FOUND');
+});
+
+// ── Lot 4 : espace Alanya Plus ─────────────────────────────────────────────
+
+test('Alanya Plus : espace et taille de fichier du plan', async () => {
+  const plus = createSafeboxService({
+    db: pool, getStorage: () => stockage, env, getSettings: async () => reglages, trashDays: async () => 30,
+    spaceFor: async () => ({ quotaBytes: 200 * Mio, maxFileBytes: 2 * 1024 * Mio, plus: true }),
+  });
+  const v = await plus.overview(E);
+  assert.strictEqual(v.quota.quotaBytes, 200 * Mio);
+  assert.strictEqual(v.quota.plus, true);
+  assert.strictEqual(v.quota.baseQuotaBytes, 50 * Mio);
+  assert.strictEqual(v.limits.maxFileBytes, 2 * 1024 * Mio);
+  // 60 Mio passe avec Plus, alors que l'espace de base (50 Mio) le refuserait.
+  const racines = Object.fromEntries(v.roots.map((r) => [r.root, r.id]));
+  const r = await plus.reserveUpload(E, { folderId: racines.documents, name: 'gros.pdf', size: 60 * Mio, plainSize: 60 * Mio, cipherFormat: 'E2C1' });
+  await refuse(svc.reserveUpload(E, { folderId: racines.documents, name: 'gros2.pdf', size: 60 * Mio, plainSize: 60 * Mio, cipherFormat: 'E2C1' }), 'SAFEBOX_QUOTA_EXCEEDED');
+  await plus.cancelUpload(E, r.fileId);
+});
+
+test('fin d\'Alanya Plus : envois et corbeille d\'abord, puis les plus récents', async () => {
+  const reduit = createSafeboxService({
+    db: pool, getStorage: () => stockage, env, getSettings: async () => reglages, trashDays: async () => 30,
+    spaceFor: async () => ({ quotaBytes: 25 * Mio, maxFileBytes: 1024 * Mio, plus: false }),
+  });
+  const racines = Object.fromEntries((await svc.overview(X)).roots.map((r) => [r.root, r.id]));
+  const vieux = await deposerFichier(X, racines.documents, 'vieux.pdf', 10 * Mio);
+  await pool.query('UPDATE safebox_file SET created_at = DATE_SUB(NOW(), INTERVAL 10 DAY) WHERE id = ?', [vieux.id]);
+  const moyen = await deposerFichier(X, racines.documents, 'moyen.pdf', 10 * Mio);
+  await pool.query('UPDATE safebox_file SET created_at = DATE_SUB(NOW(), INTERVAL 5 DAY) WHERE id = ?', [moyen.id]);
+  const recent = await deposerFichier(X, racines.documents, 'recent.pdf', 10 * Mio);
+  const jete = await deposerFichier(X, racines.documents, 'jete.pdf', 5 * Mio);
+  await svc.trashFile(X, jete.id);
+  await svc.reserveUpload(X, { folderId: racines.documents, name: 'en-cours.pdf', size: 3 * Mio, plainSize: 3 * Mio, cipherFormat: 'E2C1' });
+  // 38 Mio pour 25 : partent l'envoi (3), la corbeille (5), puis le plus récent (10) → 20 Mio.
+  const r = await reduit.purgeExcess(X);
+  assert.strictEqual(r.files, 3);
+  const restants = (await svc.largestFiles(X)).files.map((f) => f.name).sort();
+  assert.deepStrictEqual(restants, ['moyen.pdf', 'vieux.pdf']);
+  assert.strictEqual((await svc.usageOf(X)).usedBytes, 20 * Mio);
+  assert.ok(recent.id);
+  // Sous l'espace, ou abonné : rien ne part.
+  assert.deepStrictEqual(await reduit.purgeExcess(X), { files: 0, bytes: 0 });
+});
+
+test('rapprochement : objets sans fichier en base supprimés après deux jours', async () => {
+  stockage.objets.set('u/inconnu/vieux/00001', 5);
+  stockage.ages.set('u/inconnu/vieux/00001', new Date(Date.now() - 3 * 86_400_000));
+  stockage.objets.set('u/inconnu/jeune/00001', 5);
+  await assert.rejects(reconcile(pool, stockage, { alertFloor: 0, trigger: 'auto' }), /seuil/);
+  assert.ok(stockage.objets.has('u/inconnu/vieux/00001'), 'rien supprimé au-delà du seuil');
+  assert.strictEqual(await reconcile(pool, stockage, { alertFloor: 0, trigger: 'manual' }), 1);
+  assert.ok(!stockage.objets.has('u/inconnu/vieux/00001'));
+  assert.ok(stockage.objets.has('u/inconnu/jeune/00001'), 'trop récent : gardé');
+  stockage.objets.delete('u/inconnu/jeune/00001');
+  const avant = stockage.objets.size;
+  assert.strictEqual(await reconcile(pool, stockage, { alertFloor: 10, trigger: 'manual' }), 0, 'les vrais blocs ne bougent pas');
+  assert.strictEqual(stockage.objets.size, avant);
+});
+
 (async () => {
   try {
     for (const [nom, fn] of etapes) {
@@ -384,6 +562,7 @@ test('ramassage : un blob encore désigné n\'est jamais supprimé', async () =>
     }
   } finally {
     if (comptes.length) await pool.query('DELETE FROM users WHERE alanyaID IN (?)', [comptes]).catch(() => {});
+    await pool.query('DELETE FROM conversation').catch(() => {});
     await pool.query("DELETE FROM safebox_blob WHERE status <> 'ready' OR alanyaID IS NULL").catch(() => {});
     await pool.end();
   }

@@ -134,7 +134,8 @@ async function handlePurge({ alanyaID }, now = new Date()) {
   );
   if (res.affectedRows !== 1) return;
   const done = await purgeFeatureData(alanyaID);
-  console.log(`[billing] purge du compte ${alanyaID} : ${done.trips} trajet(s), ${done.lists} liste(s)`);
+  console.log(`[billing] purge du compte ${alanyaID} : ${done.trips} trajet(s), ${done.lists} liste(s), `
+    + `${done.safebox?.files ?? 0} fichier(s) du coffre au-delà de l'espace de base`);
   notifyEntitlementsChanged(alanyaID);
 }
 

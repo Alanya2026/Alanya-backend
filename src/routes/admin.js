@@ -12,6 +12,7 @@ const { adminAudit } = require('../middleware/adminAudit');
 // pourquoi ce n'est pas dans les contrôleurs.
 router.use(adminAudit);
 const { getPurges, updatePurge, runPurgeNow } = require('../controllers/admin/purges');
+const { getSafeboxAdmin, updateSafeboxSettings } = require('../controllers/admin/safebox');
 const { getServiceHealth } = require('../controllers/admin/health');
 const { getAudit, getAuditActions } = require('../controllers/admin/audit');
 const {
@@ -307,6 +308,22 @@ router.put('/purges/:name',                adminAuth, requirePermission('purges.
  *       404: { description: Purge inconnue }
  */
 router.post('/purges/:name/run',           adminAuth, requirePermission('purges.run'), runPurgeNow);
+
+/**
+ * @swagger
+ * /api/admin/safebox:
+ *   get:
+ *     summary: Coffre-fort — volume stocké (compté et réel chez MEGA), coffres, familles, plus gros consommateurs, partages, réglages
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }]
+ * /api/admin/safebox/settings:
+ *   put:
+ *     summary: Coffre-fort — espace de base, tailles maximales, profondeur, nombre de dossiers, téléchargements par jour, extensions (super-admin)
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/safebox',                     adminAuth, requirePermission('safebox.read'), getSafeboxAdmin);
+router.put('/safebox/settings',            adminAuth, requirePermission('safebox.settings'), updateSafeboxSettings);
 
 /**
  * @swagger

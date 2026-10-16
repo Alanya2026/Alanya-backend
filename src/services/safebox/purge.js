@@ -14,6 +14,12 @@
  * blobs orphelins s'arrête avant de rien supprimer chez MEGA et échoue, ce
  * qui le rend visible dans Admin › Purges. Le lancer à la main vaut
  * confirmation.
+ *
+ * S'y ajoutent deux ménages : les traces de téléchargement de fichiers
+ * partagés (plus de 31 jours : l'admin les compte sur 30), et, une fois par semaine, le rapprochement
+ * entre MEGA et la base — des objets restés chez MEGA sans ligne
+ * `safebox_blob` (une suppression interrompue, par exemple). Seuls les objets
+ * de plus de deux jours partent, et le même seuil d'arrêt s'applique.
  */
 
 const pool = require('../../config/db');
@@ -123,6 +129,63 @@ async function collectOrphans(db, storage, { blobIds = null, limit = 10_000 } = 
   return { supprimes, echecs };
 }
 
+const RAPPROCHEMENT_JOURS = 7;
+const RAPPROCHEMENT_AGE_MS = 2 * 24 * 60 * 60 * 1000;
+
+/** Préfixe de blob d'un objet : `u/<empreinte>/<uuid>/`, ou null. */
+function prefixeDe(key) {
+  const m = /^(u\/[^/]+\/[^/]+\/)/.exec(key);
+  return m ? m[1] : null;
+}
+
+/**
+ * Objets de plus de deux jours dont le blob n'existe pas en base. Parcourt le
+ * bucket page par page. Lève, sans rien supprimer, si un passage automatique
+ * en trouve plus que `alertFloor`.
+ */
+async function reconcile(db, storage, { alertFloor, trigger = 'auto', now = new Date() }) {
+  const orphelins = [];
+  let jeton;
+  do {
+    const page = await storage.listPage('u/', jeton);
+    jeton = page.next;
+    const prefixes = [...new Set(page.objects.map((o) => prefixeDe(o.key)).filter(Boolean))];
+    if (!prefixes.length) continue;
+    const [connus] = await db.query('SELECT prefix FROM safebox_blob WHERE prefix IN (?)', [prefixes]);
+    const enBase = new Set(connus.map((r) => r.prefix));
+    for (const o of page.objects) {
+      const pre = prefixeDe(o.key);
+      if (!pre || enBase.has(pre)) continue;
+      if (o.lastModified && now - o.lastModified < RAPPROCHEMENT_AGE_MS) continue;
+      orphelins.push(o.key);
+    }
+  } while (jeton);
+  if (trigger !== 'manual' && orphelins.length > alertFloor) {
+    throw new Error(
+      `${orphelins.length} objets chez MEGA sans fichier en base, au-delà du seuil de ${alertFloor} : `
+      + 'rien n\'a été supprimé. Vérifier, puis lancer la purge à la main pour confirmer.',
+    );
+  }
+  if (orphelins.length) await storage.removeKeys(orphelins);
+  return orphelins.length;
+}
+
+/** Rapprochement s'il n'a pas eu lieu depuis une semaine ; null sinon. */
+async function reconcileIfDue(db, storage, opts) {
+  let derniere;
+  try {
+    [[derniere]] = await db.query('SELECT last_reconcile_at FROM safebox_settings WHERE id = 1');
+  } catch (e) {
+    if (e.code === 'ER_BAD_FIELD_ERROR' || e.code === 'ER_NO_SUCH_TABLE') return null; // migration 102 absente
+    throw e;
+  }
+  const quand = derniere?.last_reconcile_at ? new Date(derniere.last_reconcile_at) : null;
+  if (opts.trigger !== 'manual' && quand && Date.now() - quand.getTime() < RAPPROCHEMENT_JOURS * 86_400_000) return null;
+  const n = await reconcile(db, storage, opts);
+  await db.query('UPDATE safebox_settings SET last_reconcile_at = NOW() WHERE id = 1');
+  return n;
+}
+
 /** Ce que la purge ferait maintenant, pour la page Admin › Purges. */
 async function purgeStats(opts, { db = pool } = {}) {
   const [[corbeille]] = await db.query(
@@ -170,10 +233,21 @@ async function runSafeboxPurge(opts, { trigger = 'auto', db = pool, storage = de
     );
   }
   const ramassage = await collectOrphans(db, storage);
-  return { corbeille, abandons, orphelins, ...ramassage };
+  let telechargements = 0;
+  try {
+    const [r] = await db.query('DELETE FROM safebox_share_download WHERE created_at < DATE_SUB(NOW(), INTERVAL 31 DAY)');
+    telechargements = r.affectedRows;
+  } catch (e) {
+    if (e.code !== 'ER_NO_SUCH_TABLE') throw e; // migration 102 absente
+  }
+  const rapproches = await reconcileIfDue(db, storage, { alertFloor: opts.alertFloor, trigger });
+  return { corbeille, abandons, orphelins, ...ramassage, telechargements, rapproches };
 }
 
 module.exports = {
+  reconcile,
+  reconcileIfDue,
+  prefixeDe,
   expireTrash,
   expireAbandoned,
   countOrphans,

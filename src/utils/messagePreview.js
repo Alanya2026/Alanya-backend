@@ -183,6 +183,8 @@ function mediaTypeLabel(type, { isViewOnce = false, mediaName } = {}) {
     }
     case 4:
       return mediaName ? `📎 ${mediaName}` : '📎 Fichier';
+    case 11:
+      return '📦 Fichier';
     case 5:
       return '📍 Position';
     case 7:
@@ -278,6 +280,10 @@ function messagePreview({
   // Le court-circuit doit rester AVANT le traitement générique ci-dessous,
   // qui renverrait le payload brut.
   if (t === 10) return STICKER_PREVIEW;
+
+  // type=11 : fichier du coffre-fort. `content` est un JSON (nom, taille) —
+  // l'aperçu donne le nom, jamais le payload.
+  if (t === 11) return require('./safeboxShareMessage').safeboxSharePreview(content);
 
   // type=7 : JSON contact — ne jamais exposer le content brut.
   if (t === 7) {

@@ -11,6 +11,9 @@
  *   qui efface, à la même lecture.
  * - Sauvegarde : jamais. Les archives sont chez l'utilisateur ; refuser la clé
  *   de restauration les rendrait illisibles pour toujours (écart validé).
+ * - Coffre-fort : seulement ce qui dépasse l'espace de base — envois en cours,
+ *   corbeille, puis les fichiers les plus récents (décision du 15/10/2026).
+ *   Le reste du coffre est gardé sans limite de durée.
  */
 
 const pool = require('../../config/db');
@@ -32,7 +35,18 @@ async function purgeFeatureData(alanyaID, db = pool) {
   );
   // Les fichiers suivent les colonnes : plus aucune liste ne les désigne.
   releaseRingtones(alanyaID, { tout: true });
-  return { trips: trips.affectedRows, lists: lists.affectedRows };
+  // Chargé ici : le coffre dépend lui-même du module d'abonnement.
+  const { safeboxService } = require('../safebox/service');
+  let coffre;
+  try {
+    coffre = await safeboxService().purgeExcess(alanyaID);
+  } catch (e) {
+    // Jamais bloquant pour le reste de la purge ; repris à la purge suivante
+    // de ce compte s'il en a une, sinon visible dans les journaux.
+    console.error(`[billing] coffre du compte ${alanyaID} non réduit :`, e.message);
+    coffre = { files: 0, bytes: 0, erreur: e.message };
+  }
+  return { trips: trips.affectedRows, lists: lists.affectedRows, safebox: coffre };
 }
 
 module.exports = { purgeFeatureData };

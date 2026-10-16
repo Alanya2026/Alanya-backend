@@ -33,6 +33,12 @@ const {
   toSocketError,
 } = require('../../../utils/stickerMessage');
 const { normalizeMessageType } = require('../../../utils/messageType');
+const {
+  resolveSafeboxShareFields,
+  SafeboxShareMessageError,
+  sanitizeShareReply,
+  toSocketError: toShareSocketError,
+} = require('../../../utils/safeboxShareMessage');
 
 // `mt.thumb` rejoint APRÈS m.* et réencodé en base64 : mysql2 retourne un
 // objet JS où la dernière colonne du même nom l'emporte, donc `mediaThumb`
@@ -367,6 +373,20 @@ const messageSend = (io, socket) => {
         return socket.emit('error', refus);
       }
 
+      // Fichier du coffre (type 11) : même principe que le sticker. Le partage
+      // est relu en base ; il doit être à l'expéditeur et à cette discussion.
+      try {
+        const partage = await resolveSafeboxShareFields({
+          type, content, senderID, conversationID, chiffre,
+        });
+        if (partage) ({ content, mediaUrl, mediaName } = partage);
+      } catch (e) {
+        if (!(e instanceof SafeboxShareMessageError)) throw e;
+        const refus = toShareSocketError(e);
+        emitSendFailed(socket, { clientId, ...refus });
+        return socket.emit('error', refus);
+      }
+
       // Ces quatre lectures sont indépendantes les unes des autres : les lancer
       // ensemble met leur coût en parallèle au lieu de l'additionner. Les deux
       // dernières passent par un cache 60 s et ne coûtent donc rien la plupart
@@ -391,7 +411,7 @@ const messageSend = (io, socket) => {
       // le chemin HTTP, via `sanitizeReplyContent`).
       const resolvedReplyToContent =
         (replyToContent != null && String(replyToContent).trim() !== '')
-          ? sanitizeReplyContent(replyToContent, replyTarget.type)
+          ? sanitizeShareReply(sanitizeReplyContent(replyToContent, replyTarget.type), replyTarget.type)
           : null;
 
       // Date d'envoi décidée ici et non par `NOW()` : c'est ce qui permet

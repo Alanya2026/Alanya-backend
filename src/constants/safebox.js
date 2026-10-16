@@ -35,7 +35,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   max_file_bytes_plus: 1 * Gio,
   max_depth: 5,
   max_folders: 500,
+  share_downloads_per_day: 3,
   extensions: null,
+  last_reconcile_at: null,
 });
 
 /**

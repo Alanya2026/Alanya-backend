@@ -43,6 +43,10 @@ exports.updateFile = route('updateFile', (s, req) => s.updateFile(moi(req), req.
 exports.trashFile = route('trashFile', (s, req) => s.trashFile(moi(req), req.params.id));
 exports.restoreFile = route('restoreFile', (s, req) => s.restoreFile(moi(req), req.params.id));
 exports.downloadFile = route('downloadFile', (s, req) => s.downloadFile(moi(req), req.params.id));
+exports.createShare = route('createShare', (s, req) => s.createShare(moi(req), req.body), 201);
+exports.shareInfo = route('shareInfo', (s, req) => s.shareInfo(moi(req), req.params.id));
+exports.shareDownload = route('shareDownload', (s, req) => s.shareDownload(moi(req), req.params.id));
+exports.saveShare = route('saveShare', (s, req) => s.saveShare(moi(req), req.params.id, req.body), 201);
 exports.largestFiles = route('largestFiles', (s, req) => s.largestFiles(moi(req), { limit: req.query.limit }));
 
 exports.reserveUpload = route('reserveUpload', (s, req) => s.reserveUpload(moi(req), req.body), 201);

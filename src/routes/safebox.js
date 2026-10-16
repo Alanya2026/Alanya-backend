@@ -180,6 +180,49 @@ router.get('/largest', auth, lecture, c.largestFiles);
 
 /**
  * @swagger
+ * /api/safebox/shares:
+ *   post:
+ *     summary: "Partager un fichier de mon coffre dans une discussion dont je suis membre — { fileId, conversationId }"
+ *     description: >
+ *       Rend `{ shareId, name, mime, family, plainBytes }`. Le message de type 11 ne porte ensuite que
+ *       `{ v: 1, share: shareId }` ; le serveur en réécrit le contenu (utils/safeboxShareMessage.js).
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ * /api/safebox/shares/{id}:
+ *   get:
+ *     summary: "La carte du message : disponible ou retiré, aperçu, clé, téléchargements restants (membres de la discussion)"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       404:
+ *         description: SAFEBOX_NOT_FOUND — partage inconnu, ou plus membre de la discussion
+ * /api/safebox/shares/{id}/download:
+ *   get:
+ *     summary: "Clé et adresses de tous les blocs (15 minutes) — 3 téléchargements par destinataire et par 24 h"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       410:
+ *         description: SAFEBOX_SHARE_REVOKED — l'expéditeur a supprimé le fichier de son coffre
+ *       429:
+ *         description: SAFEBOX_DOWNLOAD_LIMIT (limit joint)
+ * /api/safebox/shares/{id}/save:
+ *   post:
+ *     summary: "Enregistrer dans mon coffre — { folderId? } ; aucune copie chez MEGA, compté dans mon espace"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/shares', auth, ecriture, c.createShare);
+router.get('/shares/:id', auth, lecture, c.shareInfo);
+router.get('/shares/:id/download', auth, lecture, c.shareDownload);
+router.post('/shares/:id/save', auth, ecriture, c.saveShare);
+
+/**
+ * @swagger
  * /api/safebox/trash:
  *   get:
  *     summary: Contenu de la corbeille, avec la date à laquelle chaque élément partira

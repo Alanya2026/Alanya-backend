@@ -64,6 +64,7 @@ const ACTIONS = {
   // Rétention
   'POST /purges/:name/run': { action: 'purges.run', targetType: 'purge', param: 'name' },
   'PUT /purges/:name': { action: 'purges.settings', targetType: 'purge', param: 'name' },
+  'PUT /safebox/settings': { action: 'safebox.settings', targetType: 'safebox' },
   'POST /trips/retention/purge': { action: 'trips.purge', targetType: 'purge' },
 
   // Réglages et annuaire

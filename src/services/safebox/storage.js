@@ -59,18 +59,47 @@ function createStorage({ client, bucket, sign = getSignedUrl }) {
     return sign(client, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: ttlSeconds });
   }
 
-  /** Objets sous un préfixe : `[{ key, size }]`. */
+  /** Une page d'objets sous un préfixe (1 000 au plus) et le jeton de la suivante. */
+  async function listPage(prefix, token) {
+    const rep = await client.send(new ListObjectsV2Command({
+      Bucket: bucket, Prefix: prefix, ContinuationToken: token,
+    }));
+    return {
+      objects: (rep.Contents || []).map((o) => ({
+        key: o.Key,
+        size: Number(o.Size),
+        lastModified: o.LastModified ? new Date(o.LastModified) : null,
+      })),
+      next: rep.IsTruncated ? rep.NextContinuationToken : undefined,
+    };
+  }
+
+  /** Objets sous un préfixe : `[{ key, size, lastModified }]`. */
   async function list(prefix) {
     const out = [];
     let jeton;
     do {
-      const rep = await client.send(new ListObjectsV2Command({
-        Bucket: bucket, Prefix: prefix, ContinuationToken: jeton,
-      }));
-      for (const o of rep.Contents || []) out.push({ key: o.Key, size: Number(o.Size) });
-      jeton = rep.IsTruncated ? rep.NextContinuationToken : undefined;
+      const page = await listPage(prefix, jeton);
+      out.push(...page.objects);
+      jeton = page.next;
     } while (jeton);
     return out;
+  }
+
+  /** Supprime des objets nommés ; groupé si S4 l'accepte, un par un sinon. */
+  async function removeKeys(keys) {
+    for (let i = 0; i < keys.length; i += 1000) {
+      const lot = keys.slice(i, i + 1000);
+      try {
+        const rep = await client.send(new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: lot.map((Key) => ({ Key })), Quiet: true },
+        }));
+        if ((rep.Errors || []).length) throw new Error(`${rep.Errors.length} échec(s)`);
+      } catch {
+        for (const Key of lot) await client.send(new DeleteObjectCommand({ Bucket: bucket, Key }));
+      }
+    }
   }
 
   /**
@@ -99,7 +128,7 @@ function createStorage({ client, bucket, sign = getSignedUrl }) {
     return objets.length;
   }
 
-  return { uploadUrl, downloadUrl, list, removePrefix };
+  return { uploadUrl, downloadUrl, listPage, list, removeKeys, removePrefix };
 }
 
 let _defaut = null;

@@ -199,7 +199,7 @@
 <div class="page">
 
   <header class="masthead">
-    <div class="kicker">Alanya · backend, app et admin · conception · 15/10/2026 · version 6 · lots 1 (backend) et 2 (application) codés le 15/10</div>
+    <div class="kicker">Alanya · backend, app et admin · conception · 16/10/2026 · version 7 · lots 1 à 5 codés ; lots 3 à 5 à essayer</div>
     <h1>Le coffre-fort</h1>
     <p class="standfirst">Un espace où l'inscrit dépose les fichiers qu'il veut garder : photos, vidéos, audios et documents, rangés dans des dossiers. Les fichiers vivent chez MEGA S4, chiffrés par le téléphone. Le coffre sert aussi à envoyer à un autre inscrit un fichier trop gros pour une discussion, jusqu'à 1 Go.</p>
   </header>
@@ -571,7 +571,7 @@
           </tbody>
         </table>
       </div>
-      <p>L'espace payant est vendu avec Alanya Plus (décision du 15/10). Dans le catalogue de départ, Plus coûte 250 XAF par mois, ou 2 000 XAF par an, soit environ 167 XAF par mois. Un abonné annuel qui remplit son coffre coûte donc plus qu'il ne paie au-delà d'environ <strong>100 Go</strong>, et le mensuel au-delà d'environ <strong>150 Go</strong>. Cela avant les frais du paiement mobile et les autres avantages de Plus (médias gardés 365 jours, fichiers de 200 Mo). D'où les 50 Go retenus avec Plus (décision du 15/10), qui gardent de la marge même pour un abonné qui remplit tout.</p>
+      <p>L'espace payant est vendu avec Alanya Plus (décision du 15/10). Depuis la migration 082, la seule offre proposée est l'annuel à <strong>1 000 XAF par an</strong>, soit environ 83 XAF par mois ; le mensuel à 250 XAF n'est plus proposé. Un abonné qui remplit ses 50 Go coûte environ 82 XAF par mois chez MEGA : <strong>à peu près ce qu'il paie</strong>, avant les frais du paiement mobile et les autres avantages de Plus (médias gardés 365 jours, fichiers de 200 Mo). La plupart des abonnés ne rempliront pas tout, mais il ne reste aucune marge pour celui qui le fait. Deux leviers, sans nouveau code : baisser l'espace du plan dans l'admin (page Abonnement, champ « Espace coffre-fort »), ou relever le prix. À trancher quand le prix réel aura été relevé dans le compte MEGA.</p>
       <h3>Ce qui limite la dépense</h3>
       <ul class="plain">
         <li><strong>Le serveur ne relaie aucun octet.</strong> Envois et téléchargements vont directement entre le téléphone et MEGA : pas de bande passante du VPS, pas de serveur plus gros à prévoir.</li>
@@ -611,10 +611,13 @@
                      <span class="c">(les blocs chez MEGA ; orphelin = plus aucun fichier ne le désigne)</span>
 <span class="k">safebox_file</span>         id, alanyaID, folder_id, blob_id, name, ext, mime, family,
                      original_bytes, compressed, trashed_at, trashed_by_folder
-<span class="c">-- Plus tard</span>
-<span class="k">safebox_share</span>        lot 3 : id, file_id, conversation_id, message_id, sender_id, revoked_at
-<span class="k">safebox_download</span>     lot 3 : share_id, alanyaID, day, count
-<span class="k">plan</span>                 lot 4 : + safebox_bytes   <span class="c">(espace donné par le plan Plus)</span>
+<span class="c">-- Lot 3, migration 102_safebox_partage.sql (codée, à appliquer)</span>
+<span class="k">safebox_share</span>        id, file_id (NULL quand l'expéditeur supprime), conversation_id, sender_id,
+                     name, mime, family, plain_bytes, created_at, revoked_at
+<span class="k">safebox_share_download</span> share_id, alanyaID, created_at   <span class="c">(gardé 31 jours)</span>
+<span class="k">safebox_settings</span>     + share_downloads_per_day (3), last_reconcile_at
+<span class="c">-- Lot 4, migration 103_safebox_plus.sql (codée, à appliquer)</span>
+<span class="k">plan</span>                 + safebox_bytes   <span class="c">(espace donné par le plan ; 50 Gio pour les plans existants)</span>
 
 <span class="c">-- Routes, préfixe /api/safebox (authentifiées) — lot 1 codé</span>
 GET    /                         ouvre le coffre : espace, dossiers racines, limites
@@ -636,17 +639,23 @@ GET    /trash                    contenu de la corbeille et date de départ de c
 DELETE /trash                    vider la corbeille (supprimé tout de suite chez MEGA)
 DELETE /trash/files/:id          supprimer définitivement un fichier
 DELETE /trash/folders/:id        supprimer définitivement un dossier et son contenu
-<span class="c">-- Lot 3</span>
+<span class="c">-- Lot 3 codé</span>
 POST   /shares                   partager un fichier dans une discussion
-GET    /shares/:id/download      clé + adresses des blocs, 15 min (membre de la discussion)
+GET    /shares/:id               la carte : clé, aperçu, téléchargements restants (membre)
+GET    /shares/:id/download      clé + adresses des blocs, 15 min (membre, compte un téléchargement)
 POST   /shares/:id/save          enregistrer dans mon coffre (mêmes blocs, aucune copie)
+
+<span class="c">-- Admin, lot 5 codé</span>
+GET    /api/admin/safebox             chiffres, 20 plus gros coffres, réglages   <span class="c">(safebox.read)</span>
+PUT    /api/admin/safebox/settings    réglages   <span class="c">(safebox.settings, super-admin)</span>
 
 <span class="c">-- Réglages .env</span>
 MEGA_S4_ENDPOINT  MEGA_S4_BUCKET=safebox  MEGA_S4_KEY_ID  MEGA_S4_SECRET  MEGA_S4_REGION
 SAFEBOX_KEY       <span class="c"># 32 octets en base64, clé maîtresse des clés de fichiers</span>
 
 <span class="c">-- Purge « safebox » (Admin › Purges), réglages</span>
-durée de la corbeille (30 j), envoi abandonné après (48 h), seuil d'arrêt (5 000 fichiers par nuit)</pre>
+durée de la corbeille (30 j), envoi abandonné après (48 h), seuil d'arrêt (5 000 fichiers par nuit)
+<span class="c">-- elle vide aussi le journal des téléchargements (31 j) et rapproche MEGA et la base chaque semaine</span></pre>
       <p>Côté admin : une page « Coffre-fort » avec le volume total stocké, le nombre de coffres, les plus gros consommateurs, les téléchargements de fichiers partagés sur 30 jours et les réglages ci-dessus. Côté application : une entrée « Coffre-fort » dans le menu principal, le coffre lui-même (liste et grille, tri par nom, date, taille), la feuille de compression, les transferts en cours, la corbeille, la carte « fichier du coffre » dans les discussions.</p>
       <p><strong>Client web</strong> : S4 ne gère pas le CORS (501 au test du 14/10), un navigateur ne peut donc ni envoyer ni télécharger directement chez MEGA. Un coffre sur le web obligerait le serveur à relayer les fichiers, avec la bande passante que cela coûte. Décision du 15/10 : le coffre est dans l'application mobile seulement. Le web n'a pas d'entrée « Coffre-fort », et la carte « fichier du coffre » y affiche « À ouvrir dans l'application mobile ».</p>
     </div>
@@ -661,9 +670,10 @@ durée de la corbeille (30 j), envoi abandonné après (48 h), seuil d'arrêt (5
         <li><div class="step"><p><strong>Lot 0 · vérifier S4 avant d'écrire le coffre</strong> <span class="chip ok">fait le 15/10</span></p><p class="sub">Script <code>npm run smoke:mega-s4:lot0</code> (<code>scripts/dev/mega-s4-lot0.js</code>), 5 étapes sur 5 réussies sur <code>safebox</code> : bloc coupé sans trace, renvoi sous le même nom, comptage des blocs, lecture coupée puis reprise par <code>Range</code>, bloc trop gros refusé (403). Il a aussi montré que l'envoi en morceaux de S3 perd tout après certaines coupures, d'où les blocs indépendants (section 03). Restent pour le lot 2 : de vraies coupures sur un téléphone en données mobiles, et le choix entre <code>background_downloader</code> et un service écrit à la main. À relever quand ce sera possible : l'offre MEGA et son prix, pour remplacer les estimations de la section 09.</p></div></li>
         <li><div class="step"><p><strong>Lot 1 · backend du coffre</strong> <span class="chip ok">codé le 15/10</span></p><p class="sub">Migration <code>101_safebox.sql</code>, <code>src/services/safebox/</code> (règles, clés, stockage S4, réglages, service, purge), routes <code>/api/safebox</code>, purge <code>safebox</code> au registre et au balayage de nuit, 16 codes d'erreur au catalogue. Tests : <code>npm run test:safebox</code> (29, sans base, ajoutés à la CI) et <code>npm run test:safebox:db</code> (14 étapes contre une base jetable, jamais la production). Migration 101 appliquée en production le 15/10 (outil <code>scripts/maintenance/migration-distante.js</code>, la base n'acceptant que le VPS). Reste avant la mise en service : poser <code>MEGA_S4_*</code> et <code>SAFEBOX_KEY</code> sur le serveur, sauvegarder <code>SAFEBOX_KEY</code> hors du serveur, déployer le code. Plus tard : le rapprochement hebdomadaire des objets MEGA sans ligne en base (section 08).</p></div></li>
         <li><div class="step"><p><strong>Lot 2 · le coffre dans l'application</strong> <span class="chip ok">codé le 15/10</span></p><p class="sub">Format de chiffrement <code>SBX1</code> : morceaux de 1 Mio chiffrés, 8 par bloc de stockage, nonce déduit de la position (domaine, numéro, drapeau « dernier »), aperçu dans un domaine à part. Un bloc se chiffre depuis le fichier d'origine, sans copie chiffrée entière ; l'envoi s'arrête si l'original change. Envois et téléchargements avec reprise (coupure, redémarrage, adresse expirée, envoi abandonné côté serveur), clé du fichier dans le stockage sécurisé jusqu'à la fin de l'envoi, aperçus gardés chiffrés sur le téléphone. Écrans : accueil (espace, quatre dossiers, corbeille), dossier (grille ou liste, ajout, nouveau dossier, ouvrir, enregistrer ou partager, renommer, déplacer, supprimer), feuille de compression (qualité d'origine cochée, « Retenir mon choix »), envois en cours, corbeille ; entrée « Coffre-fort » dans le profil ; 68 textes en fr, en, zh. Compression « coffre » : photo 3 000 px JPEG 85, vidéo 1080p H.264 5 Mbit/s (Android). 34 tests. Essayé sur téléphone le 15/10 : tout fonctionne. Finitions codées ensuite : envoi qui continue quand l'inscrit quitte l'application (service Android de premier plan <code>SafeboxTransferService</code>, notification de progression, processeur gardé éveillé ; l'envoi se met en pause si l'application est balayée et reprend au démarrage suivant), reprise automatique au démarrage et au retour du réseau, alertes d'espace par notification à 80, 95 et 100 % (un appui ouvre « Libérer de l'espace »), écran « Libérer de l'espace » (plus gros fichiers, sélection multiple, vider la corbeille ; route <code>GET /api/safebox/largest</code>), compression des audios WAV et FLAC en AAC 128 kbit/s (Android) et des vidéos en 1080p sur iOS. 38 tests côté application, 15 étapes d'intégration côté serveur. La compression vidéo iOS n'a pas pu être essayée (pas de Mac).</p></div></li>
-        <li><div class="step"><p><strong>Lot 3 · gros fichiers entre inscrits</strong></p><p class="sub">Partages, nouveau type de message et sa carte avec aperçu, téléchargement par les membres, « Enregistrer dans mon coffre », limite de téléchargements, signalement.</p></div></li>
-        <li><div class="step"><p><strong>Lot 4 · l'espace avec Alanya Plus</strong></p><p class="sub">Colonne <code>plan.safebox_bytes</code>, calcul de l'espace, lecture seule à l'échéance, purge de l'excédent à 30 jours, texte de <code>purgeWarning</code> et alertes d'espace en 3 langues.</p></div></li>
-        <li><div class="step"><p><strong>Lot 5 · admin</strong></p><p class="sub">Page Coffre-fort, réglages, espace de chaque plan dans la page des plans, cartes de purge.</p></div></li>
+        <li><div class="step"><p><strong>Lot 3 · gros fichiers entre inscrits</strong> <span class="chip ok">codé le 16/10</span></p><p class="sub">Migration <code>102_safebox_partage.sql</code>. Message de type 11 « fichier du coffre » : l'application envoie le numéro du partage et la mini-image floue, le serveur réécrit le reste (nom, taille, type) et ajoute un texte de repli « 📦 nom · taille » pour les anciennes versions ; ce message ne se transfère pas. Entrée « Coffre-fort » dans le menu des pièces jointes : un fichier du coffre part tout de suite, un fichier du téléphone entre d'abord dans le coffre et part à la fin de son envoi, même après un redémarrage. Carte : mini-image floue, aperçu net, nom, taille, téléchargements restants, « Télécharger » puis « Ouvrir », « Enregistrer dans mon coffre » (mêmes blocs, espace vérifié). Limite : 3 par destinataire et par 24 heures ; une reprise dans les 2 heures ne recompte pas ; l'expéditeur n'est pas limité. Fichier supprimé par l'expéditeur : « Fichier retiré par l'expéditeur », téléchargements refusés ; un membre sorti du groupe perd l'accès. Pas encore fait, par rapport à la section 07 : la proposition automatique quand un fichier dépasse la limite des médias, le bouton « Envoyer dans une discussion » depuis le coffre, le badge « téléchargé n fois » chez l'expéditeur, l'enregistrement dans <code>Téléchargements/Alanya</code> (le fichier s'ouvre depuis l'application). Le client web affiche le texte de repli.</p></div></li>
+        <li><div class="step"><p><strong>Lot 4 · l'espace avec Alanya Plus</strong> <span class="chip ok">codé le 16/10</span></p><p class="sub">Migration <code>103_safebox_plus.sql</code> : <code>plan.safebox_bytes</code>, 50 Gio pour les plans existants. En phase payante, un compte couvert ou exempté a l'espace de son plan (même règle que les limites d'envoi), les autres l'espace de base ; en phase gratuite, l'espace de base pour tous. À l'échéance, l'espace retombe à 10 Go : rien n'est supprimé, mais un coffre au-delà ne peut plus rien ajouter. 30 jours après, la purge des avantages supprime l'excédent : envois en cours et corbeille d'abord, puis les fichiers les plus récents. <code>purgeWarning</code> parle aussi du coffre. Dans l'application : badge Plus sur l'espace, encadré de dépassement avec la date de suppression.</p></div></li>
+        <li><div class="step"><p><strong>Lot 5 · admin</strong> <span class="chip ok">codé le 16/10</span></p><p class="sub">Page Coffre-fort : coffres, fichiers, volume chez MEGA et volume compté dans les espaces, corbeilles, partages et téléchargements sur 30 jours, répartition par famille, 20 plus gros coffres, date du dernier rapprochement. Réglages modifiables par un super-admin : espace gratuit, tailles maximales, téléchargements par 24 heures, profondeur, nombre de dossiers, extensions. Champ « Espace coffre-fort » dans l'éditeur des plans, carte de la purge <code>safebox</code>. Côté serveur, le rapprochement hebdomadaire supprime chez MEGA les objets de plus de 2 jours sans ligne en base, et s'arrête au-delà du seuil d'alerte.</p></div></li>
+        <li><div class="step"><p><strong>Essais des lots 3 à 5</strong> <span class="chip todo">à faire</span></p><p class="sub">Avant : appliquer les migrations 102 et 103 en production, déployer le backend, puis installer l'APK. Sur deux téléphones : envoyer un fichier du coffre et un fichier du téléphone, voir la carte et son aperçu, télécharger puis ouvrir, atteindre la limite de 3, enregistrer dans son coffre, supprimer côté expéditeur, retirer un membre d'un groupe. Espace : un compte Plus à 50 Go, puis l'encadré de dépassement. Admin : la page Coffre-fort, un réglage modifié, l'espace d'un plan, la carte de purge. Le transfert de 1 Go attend une ligne plus rapide.</p></div></li>
       </ol>
     </div>
   </section>
@@ -691,7 +701,7 @@ durée de la corbeille (30 j), envoi abandonné après (48 h), seuil d'arrêt (5
           </tbody>
         </table>
       </div>
-      <p>L'usage de MEGA S4 est validé : le coffre-fort est une demande de la hiérarchie. Lot 0 fait ; prochaine étape : le lot 1, le backend du coffre (section 11).</p>
+      <p>L'usage de MEGA S4 est validé : le coffre-fort est une demande de la hiérarchie. Lots 0 à 5 codés ; prochaine étape : la série d'essais des lots 3 à 5 (section 11).</p>
     </div>
   </section>
 

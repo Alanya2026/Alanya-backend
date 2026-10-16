@@ -90,6 +90,8 @@ async function assertKnownFeatures(codes) {
 const PLAN_COLUMNS = [
   'code', 'name_i18n', 'duration_months', 'price_amount', 'currency', 'reminder_days',
   'is_active', 'is_featured', 'sort_order', 'store_product_ios', 'store_product_android',
+  // Espace du coffre-fort (migration 103) : à appliquer avant d'écrire cette colonne.
+  'safebox_bytes',
 ];
 
 const columnValue = (key, v) => (key === 'name_i18n' ? JSON.stringify(v) : v);

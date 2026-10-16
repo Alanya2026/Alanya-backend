@@ -38,6 +38,7 @@ const ADMIN_PERMISSIONS = [
   'broadcasts.read',
   'trips.read',
   'purges.read',
+  'safebox.read',
   'settings.read',
   'phones.read',
   'official.read',
@@ -114,6 +115,9 @@ const SUPER_ADMIN_ONLY = [
   'users.delete',
   'purges.run',
   'purges.settings',
+  // Réglages du coffre-fort : l'espace offert à chaque inscrit, donc la
+  // facture MEGA. Au niveau des purges, pour la même raison.
+  'safebox.settings',
   'trips.purge',
   'settings.write',
   // Rotation des clés de sauvegarde. Au niveau super-admin comme la

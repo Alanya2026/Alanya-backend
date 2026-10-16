@@ -19,7 +19,9 @@ function normalize(row) {
     maxFileBytesPlus: Number(r.max_file_bytes_plus),
     maxDepth: Number(r.max_depth),
     maxFolders: Number(r.max_folders),
+    shareDownloadsPerDay: Number(r.share_downloads_per_day),
     extensions: extensionsFrom(r.extensions),
+    lastReconcileAt: r.last_reconcile_at ? new Date(r.last_reconcile_at) : null,
   };
 }
 

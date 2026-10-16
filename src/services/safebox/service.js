@@ -24,6 +24,7 @@ const { keyConfigured, wrapFileKey, unwrapFileKey, accountTag } = require('./key
 const { defaultStorage } = require('./storage');
 const { getSafeboxSettings } = require('./settings');
 const { collectOrphans } = require('./purge');
+const { createPlusSpace } = require('./plusSpace');
 
 const introuvable = () => new SafeboxError('SAFEBOX_NOT_FOUND', 404, 'Introuvable');
 const taille = (b) => Number(b.stored_bytes) + Number(b.preview_bytes);
@@ -34,7 +35,10 @@ function createSafeboxService({
   env = process.env,
   getSettings = getSafeboxSettings,
   trashDays = async () => (await require('../purgeRegistry').resolveOptions('safebox')).trashDays,
+  spaceFor = null,
 } = {}) {
+  const espace = spaceFor || createPlusSpace({ db }).spaceFor;
+
   /** Le stockage, ou 503 tant que MEGA S4 et SAFEBOX_KEY ne sont pas configurés. */
   function ready() {
     const storage = keyConfigured(env) ? getStorage() : null;
@@ -43,15 +47,15 @@ function createSafeboxService({
   }
 
   /**
-   * Espace du compte. Lot 1 : l'espace de base pour tous. Le lot 4 y ajoutera
-   * celui du plan Alanya Plus (`plan.safebox_bytes`) en phase payante.
+   * Espace du compte et plus gros fichier permis : l'espace de base, ou celui
+   * du plan Alanya Plus en phase payante (lot 4, `plusSpace.js`).
    */
   async function quotaFor(alanyaID, settings) {
-    return settings.baseQuotaBytes;
+    return (await espace(alanyaID, settings)).quotaBytes;
   }
 
   async function maxFileFor(alanyaID, settings) {
-    return settings.maxFileBytes;
+    return (await espace(alanyaID, settings)).maxFileBytes;
   }
 
   async function tx(fn) {
@@ -133,15 +137,19 @@ function createSafeboxService({
     const familles = {};
     for (const root of C.ROOTS) familles[root] = { bytes: 0, files: 0 };
     for (const r of parFamille) familles[r.family] = { bytes: Number(r.octets), files: Number(r.fichiers) };
+    const sonEspace = await espace(alanyaID, settings);
     return {
       quota: {
-        quotaBytes: await quotaFor(alanyaID, settings),
+        quotaBytes: sonEspace.quotaBytes,
+        plus: sonEspace.plus,
+        baseQuotaBytes: settings.baseQuotaBytes,
         ...usage,
         byRoot: familles,
       },
       roots: C.ROOTS.map((root) => ({ id: racines[root].id, root })),
       limits: {
-        maxFileBytes: await maxFileFor(alanyaID, settings),
+        maxFileBytes: sonEspace.maxFileBytes,
+        shareDownloadsPerDay: settings.shareDownloadsPerDay,
         blockBytes: C.BLOCK_BYTES,
         maxPreviewBytes: C.MAX_PREVIEW_BYTES,
         maxDepth: settings.maxDepth,
@@ -507,6 +515,10 @@ function createSafeboxService({
   async function downloadFile(alanyaID, fileId) {
     const storage = ready();
     const f = await liveFile(db, alanyaID, fileId);
+    return planDeTelechargement(storage, f);
+  }
+
+  async function planDeTelechargement(storage, f) {
     const count = Number(f.block_count);
     const geo = { size: Number(f.stored_bytes), blockSize: Number(f.block_size), count };
     const blocs = [];
@@ -837,6 +849,266 @@ function createSafeboxService({
     return supprimerDefinitivement(ready(), alanyaID, { dossierId: id });
   }
 
+  // ── Partage entre inscrits (lot 3) ───────────────────────────────────────
+  //
+  // Le message (type 11, utils/safeboxShareMessage.js) ne porte que le numéro
+  // du partage. Tout le reste est remis ici, aux membres ACTUELS de la
+  // discussion : un membre qui quitte un groupe perd l'accès. Le fichier reste
+  // dans le coffre de l'expéditeur, sur son espace ; dès qu'il le met à la
+  // corbeille, le partage est retiré.
+
+  const retire = () => new SafeboxError('SAFEBOX_SHARE_REVOKED', 410, "Fichier retiré par l'expéditeur");
+
+  async function estMembre(conn, conversationId, alanyaID) {
+    const [r] = await conn.query(
+      'SELECT 1 FROM conv_participants WHERE conversID = ? AND alanyaID = ? LIMIT 1',
+      [conversationId, alanyaID],
+    );
+    return r.length > 0;
+  }
+
+  /** `POST /api/safebox/shares` — partager un fichier de mon coffre dans une discussion dont je suis membre. */
+  async function createShare(alanyaID, body = {}) {
+    ready();
+    const conv = R.parseId(body.conversationId);
+    if (!conv) throw introuvable();
+    const f = await liveFile(db, alanyaID, body.fileId);
+    if (!(await estMembre(db, conv, alanyaID))) throw introuvable();
+    const [r] = await db.query(
+      `INSERT INTO safebox_share (file_id, conversation_id, sender_id, name, mime, family, plain_bytes)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [f.id, conv, alanyaID, f.name, f.mime, f.family, Number(f.plain_bytes)],
+    );
+    return {
+      shareId: r.insertId,
+      name: f.name,
+      mime: f.mime,
+      family: f.family,
+      plainBytes: Number(f.plain_bytes),
+    };
+  }
+
+  /**
+   * Le partage si le demandeur est membre de sa discussion (sinon 404), et le
+   * fichier de l'expéditeur s'il est encore disponible (hors corbeille).
+   */
+  async function partageVisible(alanyaID, shareId) {
+    const id = R.parseId(shareId);
+    if (!id) throw introuvable();
+    const [[s]] = await db.query(
+      `SELECT s.* FROM safebox_share s
+         JOIN conv_participants cp ON cp.conversID = s.conversation_id AND cp.alanyaID = ?
+        WHERE s.id = ?`,
+      [alanyaID, id],
+    );
+    if (!s) throw introuvable();
+    let fichier = null;
+    if (s.file_id && !s.revoked_at) {
+      const [[f]] = await db.query(
+        `${FICHIER} WHERE f.id = ? AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'`,
+        [s.file_id, s.sender_id],
+      );
+      fichier = f || null;
+    }
+    return { s, fichier };
+  }
+
+  async function telechargementsRestants(conn, shareId, alanyaID, limite) {
+    const [[r]] = await conn.query(
+      `SELECT COUNT(*) AS n FROM safebox_share_download
+        WHERE share_id = ? AND alanyaID = ? AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)`,
+      [shareId, alanyaID],
+    );
+    return Math.max(0, limite - Number(r.n));
+  }
+
+  const shareShape = (s, fichier, extra = {}) => ({
+    id: Number(s.id),
+    conversationId: Number(s.conversation_id),
+    senderId: Number(s.sender_id),
+    name: s.name,
+    mime: s.mime,
+    family: s.family,
+    plainBytes: Number(s.plain_bytes),
+    createdAt: s.created_at,
+    available: Boolean(fichier),
+    ...extra,
+  });
+
+  /** `GET /api/safebox/shares/:id` — la carte du message : état, aperçu, clé (membres seulement). */
+  async function shareInfo(alanyaID, shareId) {
+    const storage = ready();
+    const settings = await getSettings();
+    const { s, fichier } = await partageVisible(alanyaID, shareId);
+    const expediteur = Number(s.sender_id) === Number(alanyaID);
+    const extra = { isSender: expediteur };
+    if (fichier) {
+      extra.storedBytes = taille(fichier);
+      extra.key = unwrapFileKey(fichier.wrapped_key, fichier.blob_id, env).toString('base64');
+      extra.previewUrl = Number(fichier.preview_bytes) > 0
+        ? await storage.downloadUrl(R.previewKey(fichier.prefix), C.PREVIEW_URL_TTL_S)
+        : null;
+      extra.downloadsLeft = expediteur
+        ? null
+        : await telechargementsRestants(db, s.id, alanyaID, settings.shareDownloadsPerDay);
+      const [[mien]] = await db.query(
+        'SELECT id FROM safebox_file WHERE alanyaID = ? AND blob_id = ? AND trashed_at IS NULL LIMIT 1',
+        [alanyaID, fichier.blob_id],
+      );
+      extra.savedFileId = mien ? Number(mien.id) : null;
+    }
+    return shareShape(s, fichier, extra);
+  }
+
+  /**
+   * `GET /api/safebox/shares/:id/download` — clé et adresses de tous les
+   * blocs. Un téléchargement compte une fois par fenêtre de deux heures :
+   * renouveler les adresses d'un gros fichier ne coûte rien. L'expéditeur
+   * n'est jamais limité.
+   */
+  async function shareDownload(alanyaID, shareId) {
+    const storage = ready();
+    const settings = await getSettings();
+    const { s, fichier } = await partageVisible(alanyaID, shareId);
+    if (!fichier) throw retire();
+    if (Number(s.sender_id) !== Number(alanyaID)) {
+      await tx(async (conn) => {
+        // Verrou du partage : deux demandes simultanées ne comptent qu'une fois.
+        await conn.query('SELECT id FROM safebox_share WHERE id = ? FOR UPDATE', [s.id]);
+        const [recent] = await conn.query(
+          `SELECT 1 FROM safebox_share_download
+            WHERE share_id = ? AND alanyaID = ? AND created_at > DATE_SUB(NOW(), INTERVAL 2 HOUR) LIMIT 1`,
+          [s.id, alanyaID],
+        );
+        if (recent.length) return;
+        if (await telechargementsRestants(conn, s.id, alanyaID, settings.shareDownloadsPerDay) <= 0) {
+          throw new SafeboxError('SAFEBOX_DOWNLOAD_LIMIT', 429, "Trop de téléchargements de ce fichier aujourd'hui", {
+            limit: settings.shareDownloadsPerDay,
+          });
+        }
+        await conn.query('INSERT INTO safebox_share_download (share_id, alanyaID) VALUES (?, ?)', [s.id, alanyaID]);
+      });
+    }
+    const plan = await planDeTelechargement(storage, fichier);
+    // Rien du coffre de l'expéditeur (numéro de fichier, dossier) ne sort.
+    plan.file = { ...plan.file, id: null, folderId: null };
+    return { share: shareShape(s, fichier), ...plan };
+  }
+
+  /**
+   * `POST /api/safebox/shares/:id/save` — enregistrer dans mon coffre. Rien
+   * n'est copié chez MEGA : mon fichier désigne les mêmes blocs. Il compte
+   * pourtant dans mon espace, et survit au retrait par l'expéditeur.
+   */
+  async function saveShare(alanyaID, shareId, body = {}) {
+    const storage = ready();
+    const settings = await getSettings();
+    const { fichier } = await partageVisible(alanyaID, shareId);
+    if (!fichier) throw retire();
+    const quotaBytes = await quotaFor(alanyaID, settings);
+    const racines = await ensureAccount(alanyaID);
+    const id = await tx(async (conn) => {
+      await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
+      const [[deja]] = await conn.query(
+        'SELECT id FROM safebox_file WHERE alanyaID = ? AND blob_id = ? AND trashed_at IS NULL LIMIT 1',
+        [alanyaID, fichier.blob_id],
+      );
+      if (deja) return Number(deja.id);
+      const dossier = await liveFolder(conn, alanyaID, body.folderId ?? racines[fichier.family].id);
+      if (dossier.root !== fichier.family) {
+        throw new SafeboxError('SAFEBOX_WRONG_FAMILY', 400, 'Un fichier reste dans sa famille', { expectedRoot: fichier.family });
+      }
+      // Verrou du blob, puis son état : une purge ne peut pas l'emporter
+      // pendant qu'on le désigne (voir markIfOrphan dans purge.js).
+      const [[b]] = await conn.query('SELECT status FROM safebox_blob WHERE id = ? FOR UPDATE', [fichier.blob_id]);
+      if (!b || b.status !== 'ready') throw retire();
+      const { usedBytes } = await usageOf(conn, alanyaID);
+      const ajout = taille(fichier);
+      if (!R.fitsQuota({ usedBytes, quotaBytes, addBytes: ajout })) {
+        throw new SafeboxError('SAFEBOX_QUOTA_EXCEEDED', 409, 'Espace du coffre insuffisant', {
+          usedBytes, quotaBytes, neededBytes: ajout,
+        });
+      }
+      const [r] = await conn.query(
+        `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [alanyaID, dossier.id, fichier.blob_id, fichier.name, fichier.ext, fichier.mime, fichier.family,
+          fichier.original_bytes, fichier.compressed ? 1 : 0],
+      );
+      return r.insertId;
+    });
+    return fileShape(await liveFile(db, alanyaID, id), storage);
+  }
+
+  // ── Fin d'Alanya Plus (lot 4) ────────────────────────────────────────────
+
+  /**
+   * Supprime ce qui dépasse l'espace du compte, 30 jours après la fin d'Alanya
+   * Plus (appelé par billing/featurePurge.js). Dans l'ordre : envois en cours,
+   * corbeille, puis les fichiers les plus RÉCENTS d'abord (décision du
+   * 15/10/2026). Les blocs partent chez MEGA par le ramassage des orphelins ;
+   * un fichier qu'un destinataire a enregistré dans son coffre reste chez lui.
+   */
+  async function purgeExcess(alanyaID) {
+    const storage = keyConfigured(env) ? getStorage() : null;
+    if (!storage) return { files: 0, bytes: 0 };
+    const settings = await getSettings();
+    const sonEspace = await espace(alanyaID, settings);
+    if (sonEspace.plus) return { files: 0, bytes: 0 };
+    const blobIds = new Set();
+    let fichiers = 0;
+    let octets = 0;
+    await tx(async (conn) => {
+      const [compte] = await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
+      if (!compte.length) return;
+      let { usedBytes } = await usageOf(conn, alanyaID);
+      if (usedBytes <= sonEspace.quotaBytes) return;
+      const supprimer = async (rows) => {
+        if (!rows.length) return;
+        await conn.query('DELETE FROM safebox_file WHERE id IN (?)', [rows.map((r) => r.id)]);
+        for (const r of rows) {
+          blobIds.add(Number(r.blob_id));
+          fichiers += 1;
+          octets += Number(r.t);
+        }
+      };
+      const [enCours] = await conn.query(
+        `SELECT f.id, f.blob_id, b.stored_bytes + b.preview_bytes AS t
+           FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+          WHERE f.alanyaID = ? AND (b.status = 'pending' OR f.trashed_at IS NOT NULL)`,
+        [alanyaID],
+      );
+      await supprimer(enCours);
+      await conn.query(
+        'DELETE FROM safebox_folder WHERE alanyaID = ? AND trashed_at IS NOT NULL AND trashed_by_folder IS NULL',
+        [alanyaID],
+      );
+      ({ usedBytes } = await usageOf(conn, alanyaID));
+      while (usedBytes > sonEspace.quotaBytes) {
+        const [lot] = await conn.query(
+          `SELECT f.id, f.blob_id, b.stored_bytes + b.preview_bytes AS t
+             FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+            WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+            ORDER BY f.created_at DESC, f.id DESC LIMIT 200`,
+          [alanyaID],
+        );
+        if (!lot.length) break;
+        const partants = [];
+        for (const r of lot) {
+          if (usedBytes <= sonEspace.quotaBytes) break;
+          partants.push(r);
+          usedBytes -= Number(r.t);
+        }
+        await supprimer(partants);
+      }
+    });
+    if (blobIds.size) {
+      await collectOrphans(db, storage, { blobIds: [...blobIds] })
+        .catch((e) => console.error('[Coffre] ménage après dépassement :', e.message));
+    }
+    return { files: fichiers, bytes: octets };
+  }
+
   return {
     overview,
     listFolder,
@@ -849,6 +1121,11 @@ function createSafeboxService({
     restoreFile,
     downloadFile,
     largestFiles,
+    createShare,
+    shareInfo,
+    shareDownload,
+    saveShare,
+    purgeExcess,
     reserveUpload,
     uploadUrls,
     uploadStatus,

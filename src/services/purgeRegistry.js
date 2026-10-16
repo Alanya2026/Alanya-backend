@@ -397,7 +397,9 @@ const DESCRIPTORS = {
       + "cycle de vie : sans cette purge, rien n'y est jamais effacé. La nuit, "
       + "elle s'arrête avant de toucher MEGA si elle dépasse le seuil d'arrêt : "
       + 'la lancer à la main vaut confirmation. Les fichiers du coffre ne '
-      + "s'effacent jamais par ancienneté.",
+      + "s'effacent jamais par ancienneté. Elle efface aussi les traces de "
+      + 'téléchargement de fichiers partagés de plus de 31 jours et, une fois par '
+      + 'semaine, les objets restés chez MEGA sans fichier en base (plus de deux jours).',
     knobs: [{
       key: 'trashDays',
       label: 'Durée de la corbeille',
