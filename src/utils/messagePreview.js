@@ -122,6 +122,8 @@ function systemPreviewFromContent(content) {
     // Capture d'écran d'une discussion à deux (POST /conversations/:id/screenshot).
     case 'screenshot':
       return `📸 ${who} a fait une capture d'écran`;
+    case 'screen_recording':
+      return `🎥 ${who} a enregistré l'écran`;
 
     // Lignes d'incident d'un trajet de confiance. Elles ne remontent pas la
     // conversation d'elles-mêmes (`postSystemMessage` ne touche pas à

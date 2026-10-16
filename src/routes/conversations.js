@@ -27,7 +27,7 @@ const {
   ackGroupJoin,
 } = require('../controllers/conversationController');
 const { effacerDiscussion } = require('../controllers/conversationClearController');
-const { signalerCapture } = require('../controllers/conversationScreenshotController');
+const { signalerCapture, signalerEnregistrement } = require('../controllers/conversationScreenshotController');
 const { getConversationVideoCodecs } = require('../controllers/videoCodecsController');
 
 /**
@@ -271,6 +271,33 @@ router.post('/:id/clear', auth, requireParticipant, effacerDiscussion);
  *         description: Conversation introuvable ou non participant
  */
 router.post('/:id/screenshot', auth, requireParticipant, signalerCapture);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/screen-recording:
+ *   post:
+ *     summary: Signaler un enregistrement d'écran de la discussion
+ *     description: >
+ *       Le client a détecté que la discussion est filmée (enregistrement vidéo de
+ *       l'écran) : le serveur écrit une ligne système `screen_recording` visible
+ *       des deux participants. Mêmes règles que `/screenshot` (discussion à deux,
+ *       une ligne par minute et par auteur), comptées à part des captures.
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: "{ posted: boolean, msgID?, reason? }"
+ *       404:
+ *         description: Conversation introuvable ou non participant
+ */
+router.post('/:id/screen-recording', auth, requireParticipant, signalerEnregistrement);
 router.patch('/:id/mute', auth, updateConversationMute);
 
 /**

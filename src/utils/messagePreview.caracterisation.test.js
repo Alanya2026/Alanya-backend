@@ -43,6 +43,7 @@ assert.strictEqual(p({ type: 9, content: '{"state":"closed_cancelled","closeReas
 // 6 — capture d'écran (discussion à deux) : l'aperçu nomme l'auteur, jamais le JSON
 assert.strictEqual(p({ type: 6, content: '{"e":"screenshot","by":7,"byName":"Ada"}' }), '📸 Ada a fait une capture d\'écran');
 assert.strictEqual(p({ type: 6, content: '{"e":"screenshot","by":7}' }), '📸 Quelqu\'un a fait une capture d\'écran');
+assert.strictEqual(p({ type: 6, content: '{"e":"screen_recording","by":7,"byName":"Ada"}' }), '🎥 Ada a enregistré l\'écran');
 // Chiffré : prioritaire sur tout
 assert.strictEqual(p({ type: 1, content: 'x', isEncrypted: true }), '🔒 Message chiffré');
 // 10 — sticker (T1) : plus jamais le JSON brut, qui fuyait avant la branche dédiée

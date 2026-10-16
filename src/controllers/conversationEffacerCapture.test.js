@@ -38,7 +38,7 @@ async function executer(sql, p = []) {
   }
   if (/^SELECT 1 FROM message WHERE conversationID = \? AND senderID = \? AND type = 6/.test(s)) {
     const trouve = etat.messages.some((m) => m.conversationID === p[0] && m.senderID === p[1]
-      && m.type === 6 && m.ageS <= 60 && m.content.includes('"e":"screenshot"'));
+      && m.type === 6 && m.ageS <= 60 && s.includes(`LIKE '%${m.content.slice(1, -1)}%'`));
     return [trouve ? [{ 1: 1 }] : [], []];
   }
   throw new Error(`requête non prévue par le test : ${s.slice(0, 120)}`);
@@ -55,7 +55,7 @@ remplace('../utils/systemMessage', {
   },
 });
 const { effacerDiscussion } = require('./conversationClearController');
-const { signalerCapture } = require('./conversationScreenshotController');
+const { signalerCapture, signalerEnregistrement } = require('./conversationScreenshotController');
 
 const evenements = [];
 const io = { to: (room) => ({ emit: (nom, charge) => evenements.push([room, nom, charge]) }) };
@@ -173,6 +173,33 @@ test('écriture impossible : 200 « failed », jamais d\'erreur côté client', 
   etat.postEchoue = true;
   const r = await appeler(signalerCapture, { acteur: 7 });
   assert.deepStrictEqual([r.statut, r.corps], [200, { posted: false, reason: 'failed' }]);
+});
+
+/* ── Enregistrement d'écran ────────────────────────────────────────────── */
+
+test('enregistrement : une ligne système « screen_recording », essentielle', async () => {
+  neuf(); deuxPersonnes();
+  const r = await appeler(signalerEnregistrement, { acteur: 7 });
+  assert.deepStrictEqual(r.corps, { posted: true, msgID: 501 });
+  const a = etat.systeme[0];
+  assert.deepStrictEqual([a.conversationID, a.actorID, a.event, a.essential], [1, 7, 'screen_recording', true]);
+});
+
+test('enregistrement : groupe et blocage refusés comme pour la capture', async () => {
+  neuf(); deuxPersonnes();
+  etat.politique = { isDirect: false };
+  assert.deepStrictEqual((await appeler(signalerEnregistrement, { acteur: 7 })).corps, { posted: false, reason: 'not_direct' });
+  etat.politique = { isDirect: true, action: 'reject' };
+  assert.deepStrictEqual((await appeler(signalerEnregistrement, { acteur: 7 })).corps, { posted: false, reason: 'not_allowed' });
+  assert.strictEqual(etat.systeme.length, 0);
+});
+
+test('anti-rafale par événement : une capture n\'empêche pas de dire l\'enregistrement, ni l\'inverse', async () => {
+  neuf(); deuxPersonnes();
+  assert.strictEqual((await appeler(signalerCapture, { acteur: 7 })).corps.posted, true);
+  assert.strictEqual((await appeler(signalerEnregistrement, { acteur: 7 })).corps.posted, true);
+  assert.deepStrictEqual((await appeler(signalerEnregistrement, { acteur: 7 })).corps, { posted: false, reason: 'throttled' });
+  assert.deepStrictEqual((await appeler(signalerCapture, { acteur: 7 })).corps, { posted: false, reason: 'throttled' });
 });
 
 (async () => {
