@@ -70,6 +70,15 @@ const FOLDER_NAME_MAX = 80;
 const FILE_NAME_MAX = 180;
 const PAGE_SIZE = 100;
 
+/**
+ * Commentaire d'une photo (décision du 18/10/2026) : 200 caractères de texte,
+ * 5 minutes d'audio. L'application enregistre en AAC mono ~64 kbit/s, soit
+ * environ 2,4 Mo pour 5 minutes ; 6 Mio laissent la marge d'un débit plus haut.
+ */
+const NOTE_TEXT_MAX = 200;
+const NOTE_AUDIO_MAX_MS = 5 * 60 * 1000;
+const NOTE_AUDIO_MAX_BYTES = 6 * Mio;
+
 module.exports = {
   Kio,
   Mio,
@@ -88,4 +97,7 @@ module.exports = {
   FOLDER_NAME_MAX,
   FILE_NAME_MAX,
   PAGE_SIZE,
+  NOTE_TEXT_MAX,
+  NOTE_AUDIO_MAX_MS,
+  NOTE_AUDIO_MAX_BYTES,
 };

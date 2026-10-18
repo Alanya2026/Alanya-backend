@@ -164,6 +164,13 @@ async function reconcileFull(db, storage, { alertFloor, trigger = 'auto', now = 
     if (!prefixes.length) continue;
     const [connus] = await db.query('SELECT prefix FROM safebox_blob WHERE prefix IN (?)', [prefixes]);
     const enBase = new Set(connus.map((r) => r.prefix));
+    // Audios des commentaires de photos (migration 107) : objets connus aussi.
+    try {
+      const [notes] = await db.query('SELECT audio_prefix FROM safebox_note WHERE audio_prefix IN (?)', [prefixes]);
+      for (const r of notes) enBase.add(r.audio_prefix);
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+    }
     for (const o of page.objects) {
       const pre = prefixeDe(o.key);
       if (!pre) continue;
@@ -300,6 +307,19 @@ async function runSafeboxPurge(opts, { trigger = 'auto', db = pool, storage = de
     throw e;
   }
   const abandons = await expireAbandoned(db, opts);
+  // Audio de commentaire jamais terminé : la place est rendue, l'objet éventuel
+  // devient orphelin et part au rapprochement suivant.
+  try {
+    await db.query(
+      `UPDATE safebox_note SET audio_prefix = NULL, audio_bytes = NULL, audio_plain_bytes = NULL,
+         audio_duration_ms = NULL, audio_wrapped_key = NULL, audio_status = NULL, audio_activity_at = NULL
+       WHERE audio_status = 'pending' AND audio_activity_at < DATE_SUB(NOW(), INTERVAL ? HOUR)`,
+      [opts.abandonHours],
+    );
+    await db.query('DELETE FROM safebox_note WHERE text IS NULL AND audio_prefix IS NULL');
+  } catch (e) {
+    if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+  }
   const orphelins = await countOrphans(db);
   if (trigger !== 'manual' && orphelins > opts.alertFloor) {
     throw new Error(

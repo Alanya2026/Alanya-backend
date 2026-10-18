@@ -193,4 +193,17 @@ test('détails de la carte : seulement ce qui est attendu, dans les bornes', () 
   for (const v of [null, undefined, 'pas du json', '[1]', [1], 3]) assert.strictEqual(R.normalizeMeta(v), null);
 });
 
+test('commentaire d\'une photo : 200 caractères, 5 minutes', () => {
+  assert.strictEqual(R.normalizeNoteText('  Mariage\r\nde Paul\u0007 '), 'Mariage\nde Paul');
+  for (const v of [null, undefined, '', '   ']) assert.strictEqual(R.normalizeNoteText(v), null);
+  assert.strictEqual([...R.normalizeNoteText('😀'.repeat(200))].length, 200, 'un émoji compte pour un caractère');
+  refuse(() => R.normalizeNoteText('é'.repeat(201)), 'SAFEBOX_NOTE_TOO_LONG');
+  refuse(() => R.normalizeNoteText(42), 'SAFEBOX_INVALID_NOTE');
+  assert.deepStrictEqual(R.validateNoteAudio({ size: 1016, plainSize: 1000, durationMs: 300_000 }), { size: 1016, plainSize: 1000, durationMs: 300_000 });
+  refuse(() => R.validateNoteAudio({ size: 1016, plainSize: 1000, durationMs: 302_000 }), 'SAFEBOX_NOTE_TOO_LONG');
+  refuse(() => R.validateNoteAudio({ size: 7 * Mio, plainSize: 7 * Mio - 200, durationMs: 1000 }), 'SAFEBOX_NOTE_TOO_LONG');
+  refuse(() => R.validateNoteAudio({ size: 10, plainSize: 1000, durationMs: 1000 }), 'SAFEBOX_INVALID_SIZE');
+  refuse(() => R.validateNoteAudio({}), 'SAFEBOX_INVALID_SIZE');
+});
+
 console.log(`safebox/rules : ${ok} tests passés`);

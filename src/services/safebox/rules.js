@@ -11,6 +11,9 @@ const {
   MAX_PREVIEW_BYTES,
   CIPHER_OVERHEAD_RATIO,
   CIPHER_OVERHEAD_FLOOR,
+  NOTE_TEXT_MAX,
+  NOTE_AUDIO_MAX_MS,
+  NOTE_AUDIO_MAX_BYTES,
 } = require('../../constants/safebox');
 const { SafeboxError } = require('./errors');
 
@@ -261,6 +264,45 @@ function normalizeMeta(raw) {
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * Texte du commentaire d'une photo : null pour l'effacer, sinon 200
+ * caractères au plus (comptés comme l'inscrit les voit, émojis compris).
+ * Les sauts de ligne sont gardés, les autres caractères de contrôle retirés.
+ */
+function normalizeNoteText(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') throw new SafeboxError('SAFEBOX_INVALID_NOTE', 400, 'Commentaire invalide');
+  // eslint-disable-next-line no-control-regex
+  const propre = raw.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim();
+  if (!propre) return null;
+  if ([...propre].length > NOTE_TEXT_MAX) {
+    throw new SafeboxError('SAFEBOX_NOTE_TOO_LONG', 400, `Commentaire de ${NOTE_TEXT_MAX} caractères au plus`, {
+      maxChars: NOTE_TEXT_MAX,
+    });
+  }
+  return propre;
+}
+
+/** Audio du commentaire d'une photo : 5 minutes au plus, tailles cohérentes. */
+function validateNoteAudio(body) {
+  const size = entier(body?.size);
+  const plainSize = entier(body?.plainSize);
+  const durationMs = entier(body?.durationMs);
+  if (!(size >= 1) || !(plainSize >= 1) || !(durationMs >= 1)) {
+    throw new SafeboxError('SAFEBOX_INVALID_SIZE', 400, 'Tailles ou durée manquantes');
+  }
+  if (durationMs > NOTE_AUDIO_MAX_MS + 1000 || plainSize > NOTE_AUDIO_MAX_BYTES) {
+    throw new SafeboxError('SAFEBOX_NOTE_TOO_LONG', 400, 'Commentaire audio de 5 minutes au plus', {
+      maxDurationMs: NOTE_AUDIO_MAX_MS,
+    });
+  }
+  const plafond = plainSize + Math.max(CIPHER_OVERHEAD_FLOOR, Math.ceil(plainSize * CIPHER_OVERHEAD_RATIO));
+  if (size < plainSize || size > plafond) {
+    throw new SafeboxError('SAFEBOX_INVALID_SIZE', 400, 'Taille chiffrée incohérente avec la taille en clair');
+  }
+  return { size, plainSize, durationMs: Math.min(durationMs, NOTE_AUDIO_MAX_MS) };
+}
+
 /** Vrai si l'espace suffit pour `ajout` octets de plus. */
 function fitsQuota({ usedBytes, quotaBytes, addBytes }) {
   return usedBytes + addBytes <= quotaBytes;
@@ -287,4 +329,6 @@ module.exports = {
   decodeFileKey,
   fitsQuota,
   normalizeMeta,
+  normalizeNoteText,
+  validateNoteAudio,
 };

@@ -40,6 +40,10 @@ exports.trashFolder = route('trashFolder', (s, req) => s.trashFolder(moi(req), r
 exports.restoreFolder = route('restoreFolder', (s, req) => s.restoreFolder(moi(req), req.params.id));
 
 exports.updateFile = route('updateFile', (s, req) => s.updateFile(moi(req), req.params.id, req.body));
+exports.setNoteText = route('setNoteText', (s, req) => s.setNoteText(moi(req), req.params.id, req.body));
+exports.reserveNoteAudio = route('reserveNoteAudio', (s, req) => s.reserveNoteAudio(moi(req), req.params.id, req.body));
+exports.completeNoteAudio = route('completeNoteAudio', (s, req) => s.completeNoteAudio(moi(req), req.params.id, req.body));
+exports.deleteNoteAudio = route('deleteNoteAudio', (s, req) => s.deleteNoteAudio(moi(req), req.params.id));
 exports.trashFile = route('trashFile', (s, req) => s.trashFile(moi(req), req.params.id));
 exports.restoreFile = route('restoreFile', (s, req) => s.restoreFile(moi(req), req.params.id));
 exports.downloadFile = route('downloadFile', (s, req) => s.downloadFile(moi(req), req.params.id));

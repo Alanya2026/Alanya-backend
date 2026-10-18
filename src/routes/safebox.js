@@ -163,6 +163,37 @@ router.delete('/uploads/:id', auth, ecriture, c.cancelUpload);
  */
 router.patch('/files/:id', auth, ecriture, c.updateFile);
 router.delete('/files/:id', auth, ecriture, c.trashFile);
+
+/**
+ * @swagger
+ * /api/safebox/files/{id}/note:
+ *   put:
+ *     summary: "Texte du commentaire d'une photo (200 caractères au plus ; null ou vide : effacé). Privé"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ * /api/safebox/files/{id}/note/audio:
+ *   post:
+ *     summary: "Réserver l'audio du commentaire (5 minutes au plus) : corps { size, plainSize, durationMs }, rend l'adresse d'envoi"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ *   delete:
+ *     summary: "Supprimer l'audio du commentaire (le texte reste)"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ * /api/safebox/files/{id}/note/audio/complete:
+ *   post:
+ *     summary: "Terminer l'envoi de l'audio : corps { key }, vérifié chez MEGA"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.put('/files/:id/note', auth, ecriture, c.setNoteText);
+router.post('/files/:id/note/audio', auth, ecriture, c.reserveNoteAudio);
+router.post('/files/:id/note/audio/complete', auth, ecriture, c.completeNoteAudio);
+router.delete('/files/:id/note/audio', auth, ecriture, c.deleteNoteAudio);
 router.post('/files/:id/restore', auth, ecriture, c.restoreFile);
 router.get('/files/:id/download', auth, lecture, c.downloadFile);
 

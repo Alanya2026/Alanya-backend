@@ -119,7 +119,26 @@ function createSafeboxService({
         WHERE f.alanyaID = ?`,
       [alanyaID],
     );
-    return { usedBytes: Number(u.used), pendingBytes: Number(u.pending), trashBytes: Number(u.trash) };
+    let notes = { used: 0, pending: 0, trash: 0 };
+    try {
+      // Audios des commentaires de photos (migration 107) : ils comptent aussi.
+      const [[n]] = await conn.query(
+        `SELECT COALESCE(SUM(n.audio_bytes), 0) AS used,
+                COALESCE(SUM(IF(n.audio_status = 'pending', n.audio_bytes, 0)), 0) AS pending,
+                COALESCE(SUM(IF(f.trashed_at IS NOT NULL, n.audio_bytes, 0)), 0) AS trash
+           FROM safebox_note n JOIN safebox_file f ON f.id = n.file_id
+          WHERE f.alanyaID = ? AND n.audio_prefix IS NOT NULL`,
+        [alanyaID],
+      );
+      notes = { used: Number(n.used), pending: Number(n.pending), trash: Number(n.trash) };
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+    }
+    return {
+      usedBytes: Number(u.used) + notes.used,
+      pendingBytes: Number(u.pending) + notes.pending,
+      trashBytes: Number(u.trash) + notes.trash,
+    };
   }
 
   /** `GET /api/safebox` — l'espace, les dossiers racines, les limites. */
@@ -262,11 +281,47 @@ function createSafeboxService({
     return out;
   }
 
-  /** Ajoute aux lignes leur `meta` et, sur demande, leur `sent` (badge). */
-  async function enrichir(rows, { envois = false } = {}) {
+  /**
+   * Commentaires des photos (migration 107), pour leur propriétaire seulement :
+   * texte, et audio prêt avec son adresse signée et sa clé.
+   */
+  async function notesDe(storage, fileIds) {
+    const ids = [...new Set(fileIds.map(Number).filter(Boolean))];
+    const out = new Map();
+    if (!ids.length) return out;
+    let rows;
+    try {
+      [rows] = await db.query('SELECT * FROM safebox_note WHERE file_id IN (?)', [ids]);
+    } catch (e) {
+      if (e.code === 'ER_NO_SUCH_TABLE') return out;
+      throw e;
+    }
+    for (const n of rows) out.set(Number(n.file_id), await noteShape(storage, n));
+    return out;
+  }
+
+  async function noteShape(storage, n) {
+    const pret = n.audio_prefix && n.audio_status === 'ready' && n.audio_wrapped_key;
+    const audio = pret
+      ? {
+        durationMs: Number(n.audio_duration_ms),
+        plainBytes: Number(n.audio_plain_bytes),
+        storedBytes: Number(n.audio_bytes),
+        url: await storage.downloadUrl(R.blockKey(n.audio_prefix, 1), C.PREVIEW_URL_TTL_S),
+        key: unwrapFileKey(n.audio_wrapped_key, `note-${n.file_id}`, env).toString('base64'),
+      }
+      : null;
+    if (!n.text && !audio) return null;
+    return { text: n.text || null, audio, updatedAt: n.updated_at };
+  }
+
+  /** Ajoute aux lignes leur `meta` et, sur demande, leur `sent` (badge) et leur `note`. */
+  async function enrichir(rows, { envois = false, notes = null } = {}) {
     const details = await detailsDe(rows.map((f) => f.blob_id));
     const partages = envois ? await envoisDe(rows.map((f) => f.id)) : new Map();
+    const commentaires = notes ? await notesDe(notes, rows.filter((f) => f.family === 'albums').map((f) => f.id)) : null;
     for (const f of rows) {
+      if (commentaires) f.note = commentaires.get(Number(f.id)) ?? null;
       const d = details.get(Number(f.blob_id));
       f.meta = d?.meta ?? null;
       f.lost = Boolean(d?.lostAt);
@@ -307,6 +362,8 @@ function createSafeboxService({
       updatedAt: f.updated_at,
     };
     if (f.sent !== undefined) out.sent = f.sent;
+    // Commentaire privé : seulement quand l'appelant l'a demandé pour le propriétaire.
+    if (f.note !== undefined) out.note = f.note;
     if (f.wrapped_key) out.key = unwrapFileKey(f.wrapped_key, f.blob_id, env).toString('base64');
     out.previewUrl = Number(f.preview_bytes) > 0
       ? await storage.downloadUrl(R.previewKey(prefix), C.PREVIEW_URL_TTL_S)
@@ -350,7 +407,7 @@ function createSafeboxService({
       folder: folderShape(dossier),
       breadcrumbs: ascendance.map(folderShape),
       folders: sousDossiers,
-      files: await Promise.all((await enrichir(fichiers, { envois: true })).map((f) => fileShape(f, storage))),
+      files: await Promise.all((await enrichir(fichiers, { envois: true, notes: storage })).map((f) => fileShape(f, storage))),
       nextCursor: fichiers.length === C.PAGE_SIZE ? Number(fichiers[fichiers.length - 1].id) : null,
     };
   }
@@ -674,6 +731,142 @@ function createSafeboxService({
         folderName: f.folder_name,
       }))),
     };
+  }
+
+  // ── Commentaire d'une photo (décision du 18/10/2026) ─────────────────────
+
+  /** Une photo vivante de mon coffre : seules les photos ont un commentaire. */
+  async function photoAMoi(alanyaID, fileId) {
+    const f = await liveFile(db, alanyaID, fileId);
+    if (f.family !== 'albums') {
+      throw new SafeboxError('SAFEBOX_NOTE_UNAVAILABLE', 400, 'Les commentaires sont réservés aux photos');
+    }
+    return f;
+  }
+
+  async function lireNote(conn, fileId, verrou = false) {
+    const [[n]] = await conn.query(`SELECT * FROM safebox_note WHERE file_id = ?${verrou ? ' FOR UPDATE' : ''}`, [fileId]);
+    return n || null;
+  }
+
+  async function rendreNote(storage, fileId) {
+    return noteShape(storage, (await lireNote(db, fileId)) || { file_id: fileId });
+  }
+
+  /** Efface chez MEGA l'audio remplacé ou supprimé ; à défaut, le rapprochement s'en charge. */
+  async function effacerAudio(storage, prefixe) {
+    if (!prefixe) return;
+    try {
+      await storage.removePrefix(prefixe);
+    } catch (e) {
+      console.error(`[Coffre] audio de commentaire ${prefixe} non supprimé (le rapprochement le reprendra) :`, e.message);
+    }
+  }
+
+  /** `PUT /api/safebox/files/:id/note` — texte du commentaire (null ou vide : effacé). */
+  async function setNoteText(alanyaID, fileId, body = {}) {
+    const storage = ready();
+    const f = await photoAMoi(alanyaID, fileId);
+    const texte = R.normalizeNoteText(body.text);
+    await tx(async (conn) => {
+      const n = await lireNote(conn, f.id, true);
+      if (!texte && !(n && n.audio_prefix)) {
+        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [f.id]);
+      } else {
+        await conn.query(
+          'INSERT INTO safebox_note (file_id, text) VALUES (?, ?) ON DUPLICATE KEY UPDATE text = VALUES(text)',
+          [f.id, texte],
+        );
+      }
+    });
+    return { note: await rendreNote(storage, f.id) };
+  }
+
+  /**
+   * `POST /api/safebox/files/:id/note/audio` — réserve la place d'un audio
+   * (5 minutes au plus) et rend son adresse d'envoi. Un audio précédent est
+   * remplacé.
+   */
+  async function reserveNoteAudio(alanyaID, fileId, body = {}) {
+    const storage = ready();
+    const settings = await getSettings();
+    const f = await photoAMoi(alanyaID, fileId);
+    const { size, plainSize, durationMs } = R.validateNoteAudio(body);
+    const quotaBytes = await quotaFor(alanyaID, settings);
+    const prefix = `u/${accountTag(alanyaID, env)}/${crypto.randomUUID()}/`;
+    const ancien = await tx(async (conn) => {
+      await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
+      const n = await lireNote(conn, f.id, true);
+      const { usedBytes } = await usageOf(conn, alanyaID);
+      const libere = n && n.audio_prefix ? Number(n.audio_bytes) || 0 : 0;
+      if (!R.fitsQuota({ usedBytes: usedBytes - libere, quotaBytes, addBytes: size })) {
+        throw new SafeboxError('SAFEBOX_QUOTA_EXCEEDED', 409, 'Espace du coffre insuffisant', {
+          usedBytes, quotaBytes, neededBytes: size,
+        });
+      }
+      await conn.query(
+        `INSERT INTO safebox_note (file_id, audio_prefix, audio_bytes, audio_plain_bytes, audio_duration_ms,
+                                   audio_wrapped_key, audio_status, audio_activity_at)
+         VALUES (?, ?, ?, ?, ?, NULL, 'pending', NOW())
+         ON DUPLICATE KEY UPDATE audio_prefix = VALUES(audio_prefix), audio_bytes = VALUES(audio_bytes),
+           audio_plain_bytes = VALUES(audio_plain_bytes), audio_duration_ms = VALUES(audio_duration_ms),
+           audio_wrapped_key = NULL, audio_status = 'pending', audio_activity_at = NOW()`,
+        [f.id, prefix, size, plainSize, durationMs],
+      );
+      return n ? n.audio_prefix : null;
+    });
+    await effacerAudio(storage, ancien);
+    return {
+      size,
+      url: await storage.uploadUrl(R.blockKey(prefix, 1), size, C.UPLOAD_URL_TTL_S),
+      urlTtlSeconds: C.UPLOAD_URL_TTL_S,
+    };
+  }
+
+  /** `POST /api/safebox/files/:id/note/audio/complete` — vérifie l'objet chez MEGA, range la clé. */
+  async function completeNoteAudio(alanyaID, fileId, body = {}) {
+    const storage = ready();
+    const f = await photoAMoi(alanyaID, fileId);
+    const cle = R.decodeFileKey(body.key);
+    const n = await lireNote(db, f.id);
+    if (!n || !n.audio_prefix || n.audio_status !== 'pending') throw introuvable();
+    const objets = await storage.list(n.audio_prefix);
+    const recu = objets.find((o) => o.key === R.blockKey(n.audio_prefix, 1));
+    if (!recu || Number(recu.size) !== Number(n.audio_bytes)) {
+      throw new SafeboxError('SAFEBOX_UPLOAD_INCOMPLETE', 409, "L'audio n'est pas encore arrivé chez MEGA", {
+        missing: [1], missingCount: 1, previewMissing: false,
+      });
+    }
+    const [r] = await db.query(
+      `UPDATE safebox_note SET audio_wrapped_key = ?, audio_status = 'ready', audio_activity_at = NOW()
+        WHERE file_id = ? AND audio_prefix = ? AND audio_status = 'pending'`,
+      [wrapFileKey(cle, `note-${f.id}`, env), f.id, n.audio_prefix],
+    );
+    if (!r.affectedRows) throw introuvable(); // remplacé entre-temps
+    return { note: await rendreNote(storage, f.id) };
+  }
+
+  /** `DELETE /api/safebox/files/:id/note/audio` — supprime l'audio, garde le texte. */
+  async function deleteNoteAudio(alanyaID, fileId) {
+    const storage = ready();
+    const f = await photoAMoi(alanyaID, fileId);
+    const ancien = await tx(async (conn) => {
+      const n = await lireNote(conn, f.id, true);
+      if (!n || !n.audio_prefix) return null;
+      if (n.text) {
+        await conn.query(
+          `UPDATE safebox_note SET audio_prefix = NULL, audio_bytes = NULL, audio_plain_bytes = NULL,
+             audio_duration_ms = NULL, audio_wrapped_key = NULL, audio_status = NULL, audio_activity_at = NULL
+           WHERE file_id = ?`,
+          [f.id],
+        );
+      } else {
+        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [f.id]);
+      }
+      return n.audio_prefix;
+    });
+    await effacerAudio(storage, ancien);
+    return { note: await rendreNote(storage, f.id) };
   }
 
   // ── Envois ───────────────────────────────────────────────────────────────
@@ -1370,6 +1563,10 @@ function createSafeboxService({
     moderationView,
     moderationRevoke,
     moderationDelete,
+    setNoteText,
+    reserveNoteAudio,
+    completeNoteAudio,
+    deleteNoteAudio,
     reserveUpload,
     uploadUrls,
     uploadStatus,

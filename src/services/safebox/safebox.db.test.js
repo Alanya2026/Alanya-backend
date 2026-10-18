@@ -19,7 +19,7 @@
  *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
  *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
  *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
- *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires; do
+ *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires; do
  *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
@@ -714,6 +714,82 @@ test('fichiers perdus chez MEGA : marqués, refusés, démarqués s\'ils revienn
   const vide = { listPage: async () => ({ objects: [], next: undefined }), removeKeys: async () => {} };
   await assert.rejects(reconcileFull(pool, vide, { alertFloor: 10, trigger: 'auto', now: plusTard }), /semblent perdus/);
   assert.strictEqual((await lu()).lost, false, 'rien marqué au-delà du seuil');
+});
+
+test('commentaire d\'une photo : texte, audio, privé, compté dans l\'espace (migration 107)', async () => {
+  const [[t]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'safebox_note'`,
+  );
+  const K = await compte('photographe');
+  const racinesK = Object.fromEntries((await svc.overview(K)).roots.map((r) => [r.root, r.id]));
+  const photo = await deposerFichier(K, racinesK.albums, 'Plage.jpg', 30);
+  const pdf = await deposerFichier(K, racinesK.documents, 'Contrat.pdf', 30);
+  const vue = async () => (await svc.listFolder(K, racinesK.albums)).files.find((x) => x.id === photo.id);
+  if (!Number(t.n)) {
+    assert.strictEqual((await vue()).note, null, 'sans la migration 107 : pas de commentaire, rien ne casse');
+    return;
+  }
+  await refuse(svc.setNoteText(K, pdf.id, { text: 'x' }), 'SAFEBOX_NOTE_UNAVAILABLE');
+  await refuse(svc.setNoteText(K, photo.id, { text: 'é'.repeat(201) }), 'SAFEBOX_NOTE_TOO_LONG');
+  await refuse(svc.setNoteText(A, photo.id, { text: 'pas à moi' }), 'SAFEBOX_NOT_FOUND');
+  assert.strictEqual((await svc.setNoteText(K, photo.id, { text: '  Mariage de Paul  ' })).note.text, 'Mariage de Paul');
+  assert.deepStrictEqual((await vue()).note.audio, null);
+
+  // Audio : réservé, compté, vérifié chez MEGA, puis lisible par son propriétaire.
+  const avant = (await svc.usageOf(K)).usedBytes;
+  await refuse(svc.reserveNoteAudio(K, photo.id, { size: 2000, plainSize: 1984, durationMs: 301_500 }), 'SAFEBOX_NOTE_TOO_LONG');
+  const r1 = await svc.reserveNoteAudio(K, photo.id, { size: 2000, plainSize: 1984, durationMs: 60_000 });
+  assert.strictEqual((await svc.usageOf(K)).usedBytes, avant + 2000);
+  await refuse(svc.completeNoteAudio(K, photo.id, { key: cle.toString('base64') }), 'SAFEBOX_UPLOAD_INCOMPLETE');
+  const objet1 = r1.url.replace('https://s4.test/put/', '').replace(/\?size=\d+$/, '');
+  stockage.objets.set(objet1, 2000);
+  const fin = await svc.completeNoteAudio(K, photo.id, { key: cle.toString('base64') });
+  assert.strictEqual(fin.note.text, 'Mariage de Paul');
+  assert.strictEqual(fin.note.audio.durationMs, 60_000);
+  assert.strictEqual(fin.note.audio.key, cle.toString('base64'));
+  assert.ok(fin.note.audio.url.endsWith('00001'));
+
+  // Réenregistré : l'ancien audio part tout de suite de chez MEGA, l'espace ne compte que le nouveau.
+  const r2 = await svc.reserveNoteAudio(K, photo.id, { size: 3000, plainSize: 2984, durationMs: 90_000 });
+  assert.ok(!stockage.objets.has(objet1));
+  assert.strictEqual((await svc.usageOf(K)).usedBytes, avant + 3000);
+  const objet2 = r2.url.replace('https://s4.test/put/', '').replace(/\?size=\d+$/, '');
+  stockage.objets.set(objet2, 3000);
+  await svc.completeNoteAudio(K, photo.id, { key: cle.toString('base64') });
+
+  // Privé : ni le destinataire d'un partage, ni sa copie enregistrée ne le voient.
+  const Q = await compte('ami-photo');
+  const [c] = await pool.query('INSERT INTO conversation () VALUES ()');
+  await pool.query('INSERT INTO conv_participants (conversID, alanyaID) VALUES (?, ?), (?, ?)', [c.insertId, K, c.insertId, Q]);
+  const p = await svc.createShare(K, { fileId: photo.id, conversationId: c.insertId });
+  const plan = await svc.shareDownload(Q, p.shareId);
+  assert.ok(!('note' in plan.file), 'le commentaire ne part pas avec la photo');
+  const copie = await svc.saveShare(Q, p.shareId);
+  const racinesQ = Object.fromEntries((await svc.overview(Q)).roots.map((r) => [r.root, r.id]));
+  assert.strictEqual((await svc.listFolder(Q, racinesQ.albums)).files.find((x) => x.id === copie.id).note, null);
+
+  // Le rapprochement ne prend pas l'audio pour un objet orphelin.
+  stockage.ages.set(objet2, new Date(Date.now() - 10 * 86_400_000));
+  await reconcileFull(pool, stockage, { alertFloor: 10, trigger: 'manual' });
+  assert.ok(stockage.objets.has(objet2));
+
+  // Supprimer l'audio garde le texte ; effacer le texte ensuite efface le commentaire.
+  const sansAudio = await svc.deleteNoteAudio(K, photo.id);
+  assert.strictEqual(sansAudio.note.audio, null);
+  assert.strictEqual(sansAudio.note.text, 'Mariage de Paul');
+  assert.ok(!stockage.objets.has(objet2));
+  assert.strictEqual((await svc.usageOf(K)).usedBytes, avant);
+  assert.strictEqual((await svc.setNoteText(K, photo.id, { text: '' })).note, null);
+  const [[reste]] = await pool.query('SELECT COUNT(*) AS n FROM safebox_note WHERE file_id = ?', [photo.id]);
+  assert.strictEqual(Number(reste.n), 0);
+
+  // La photo supprimée emporte son commentaire.
+  await svc.setNoteText(K, photo.id, { text: 'encore' });
+  await svc.trashFile(K, photo.id);
+  await svc.emptyTrash(K);
+  const [[parti]] = await pool.query('SELECT COUNT(*) AS n FROM safebox_note WHERE file_id = ?', [photo.id]);
+  assert.strictEqual(Number(parti.n), 0);
 });
 
 (async () => {
