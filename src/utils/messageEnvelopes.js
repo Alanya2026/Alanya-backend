@@ -9,8 +9,8 @@
  *
  * Rien de cryptographique : le serveur n'a aucune clé et ne peut rien
  * authentifier. Ce qui est vérifié, c'est la FORME — le corps existe, le
- * nonce fait 12 octets, chaque enveloppe nomme un appareil et porte un
- * en-tête, aucune enveloppe n'est adressée deux fois au même appareil.
+ * nonce fait 12 octets, chaque enveloppe nomme un appareil et porte un type
+ * Signal connu, aucune enveloppe n'est adressée deux fois au même appareil.
  *
  * Un corps chiffré sans enveloppe, ou dont les enveloppes n'atteignent pas
  * les bons appareils, est un message perdu pour tout le monde : l'émetteur
@@ -22,13 +22,25 @@
 
 const NONCE_OCTETS = 12;
 
-// Types d'enveloppe. 1 et 2 portent une clé scellée par le cliquet
-// deux-à-deux ; 3 n'en porte pas (la clé se dérive de la chaîne
-// d'expéditeur du groupe, que le destinataire détient déjà).
-const ENV_AMORCAGE = 1;
-const ENV_CLIQUET = 2;
-const ENV_CHAINE_GROUPE = 3;
-const ENV_TYPES = new Set([ENV_AMORCAGE, ENV_CLIQUET, ENV_CHAINE_GROUPE]);
+// Types d'enveloppe : ceux de libsignal_protocol_dart (`CiphertextMessage`),
+// tels quels. Les noms ne doivent jamais faire oublier les valeurs : la
+// bibliothèque JavaScript historique numérote autrement (1 = cliquet), et
+// un client qui déchiffre avec la mauvaise méthode obtient une erreur qui
+// parle d'autre chose (docs/e2ee, chapitre 1).
+//
+// 3 et 2 portent la clé de contenu scellée par la session deux-à-deux ; 4
+// n'en porte pas (la clé se dérive de la chaîne d'expéditeur du groupe, que
+// le destinataire détient déjà).
+const TYPE_SIGNAL_CLIQUET = 2; // SignalMessage
+const TYPE_SIGNAL_AMORCAGE = 3; // PreKeySignalMessage : le premier d'une session
+const TYPE_SIGNAL_CHAINE_GROUPE = 4; // SenderKeyMessage
+const ENV_TYPES = new Set([
+  TYPE_SIGNAL_CLIQUET, TYPE_SIGNAL_AMORCAGE, TYPE_SIGNAL_CHAINE_GROUPE,
+]);
+
+// Taille de la clé scellée. Un message d'amorçage qui transporte 32 octets en
+// fait 184 (mesuré) ; la colonne en accepte 512 (migration 104).
+const CLE_SCELLEE_MAX_OCTETS = 512;
 
 // Même borne que le lot de bundles : au-delà, le client découpe. Une
 // enveloppe pèse quelques centaines d'octets, mais 400 enveloppes dans une
@@ -137,18 +149,22 @@ function normaliseChiffre(data = {}, emetteurId = null) {
     }
     vus.add(appareilId);
 
-    const header = typeof e.header === 'string' ? e.header : '';
-    if (header === '') {
+    // L'en-tête est facultatif : un message Signal porte déjà le sien (clé
+    // de cliquet, compteurs) dans `wrappedKey`. S'il est fourni, ce doit être
+    // une chaîne — un objet glissé là par erreur finirait en « [object
+    // Object] » en base.
+    if (e.header != null && typeof e.header !== 'string') {
       throw new EnveloppeInvalide(
-        'E2EE_ENVELOPPE_INVALIDE', `envelopes[${i}].header requis`,
+        'E2EE_ENVELOPPE_INVALIDE', `envelopes[${i}].header doit être une chaîne`,
       );
     }
+    const header = e.header || '';
 
     const envType = Number(e.envType);
     if (!ENV_TYPES.has(envType)) {
       throw new EnveloppeInvalide(
         'E2EE_ENVELOPPE_TYPE',
-        `envelopes[${i}].envType doit valoir 1, 2 ou 3`,
+        `envelopes[${i}].envType doit valoir 2, 3 ou 4 (types Signal)`,
       );
     }
 
@@ -157,7 +173,13 @@ function normaliseChiffre(data = {}, emetteurId = null) {
     // Un type deux-à-deux sans clé scellée ne s'ouvre pas ; une chaîne de
     // groupe avec clé scellée révèle une confusion de chemin côté client.
     // Les deux sont des défauts, pas des variantes.
-    if (envType === ENV_CHAINE_GROUPE) {
+    if (scellee && scellee.length > CLE_SCELLEE_MAX_OCTETS) {
+      throw new EnveloppeInvalide(
+        'E2EE_ENVELOPPE_INVALIDE',
+        `envelopes[${i}].wrappedKey limité à ${CLE_SCELLEE_MAX_OCTETS} octets, ${scellee.length} reçus`,
+      );
+    }
+    if (envType === TYPE_SIGNAL_CHAINE_GROUPE) {
       if (scellee) {
         throw new EnveloppeInvalide(
           'E2EE_ENVELOPPE_TYPE',
@@ -317,10 +339,11 @@ async function marqueRemises(conn, msgIDs, appareilId) {
  * aucune requête. C'est ce qui permet de livrer ce chemin avant qu'un seul
  * client ne chiffre quoi que ce soit.
  *
- * `marqueRemises` est volontairement sans `await` et sans propagation
- * d'erreur : elle n'alimente que la purge, jamais l'affichage ni les accusés.
- * Faire échouer une lecture d'historique parce qu'une date de ménage n'a pas
- * pu s'écrire serait une panne inventée de toutes pièces.
+ * Servir n'est PAS remettre : la lecture ne pose pas `delivered_at`.
+ * L'appareil peut perdre la réponse, ou s'arrêter en plein déchiffrement ;
+ * l'enveloppe doit rester servie jusqu'à son accusé explicite (`e2ee:ack`,
+ * `socket/handlers/chat/e2eeAck.js`), envoyé une fois le message RANGÉ
+ * (docs/e2ee, chapitres 1 et 11).
  */
 async function attacheChiffre(conn, lignes, appareilId) {
   if (!Array.isArray(lignes) || lignes.length === 0 || !appareilId) return lignes;
@@ -340,17 +363,15 @@ async function attacheChiffre(conn, lignes, appareilId) {
     ligne.envelope = paquet.envelope;
   }
 
-  marqueRemises(conn, [...paquets.keys()], appareilId)
-    .catch((e) => console.warn('[E2EE] marqueRemises:', e.message));
-
   return lignes;
 }
 
 module.exports = {
   NONCE_OCTETS,
-  ENV_AMORCAGE,
-  ENV_CLIQUET,
-  ENV_CHAINE_GROUPE,
+  TYPE_SIGNAL_CLIQUET,
+  TYPE_SIGNAL_AMORCAGE,
+  TYPE_SIGNAL_CHAINE_GROUPE,
+  CLE_SCELLEE_MAX_OCTETS,
   ENVELOPPES_MAX,
   CORPS_MAX_OCTETS,
   EnveloppeInvalide,

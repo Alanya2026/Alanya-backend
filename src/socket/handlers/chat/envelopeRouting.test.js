@@ -27,8 +27,8 @@ const MES_APPAREILS = new Set([10, 11]);
 
 const enveloppes = [
   { appareilId: 11, header: '{"n":0}', envType: 2, wrappedKey: Buffer.alloc(48, 1) },
-  { appareilId: 20, header: '{"n":1}', envType: 1, wrappedKey: Buffer.alloc(48, 2) },
-  { appareilId: 21, header: '{"c":3}', envType: 3, wrappedKey: null },
+  { appareilId: 20, header: '{"n":1}', envType: 3, wrappedKey: Buffer.alloc(48, 2) },
+  { appareilId: 21, header: '{"c":3}', envType: 4, wrappedKey: null },
 ];
 
 // ── Le plan : une entrée par appareil, l'événement choisi par propriété ───
@@ -135,7 +135,7 @@ assert.ok(!JSON.stringify(vers20.payload).includes('"appareilId":11'));
 // Enveloppe de chaîne de groupe : `wrappedKey` à null, jamais absente.
 const vers21 = emissions.find((e) => e.room === 'appareil_21');
 assert.strictEqual(vers21.payload.envelope.wrappedKey, null);
-assert.strictEqual(vers21.payload.envelope.envType, 3);
+assert.strictEqual(vers21.payload.envelope.envType, 4);
 
 // Un plan qui nomme un appareil sans enveloppe n'émet rien pour lui : mieux
 // vaut un message qui arrive par la synchronisation qu'un payload tronqué.

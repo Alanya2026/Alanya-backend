@@ -14,9 +14,10 @@
 const assert = require('assert');
 const {
   NONCE_OCTETS,
-  ENV_AMORCAGE,
-  ENV_CLIQUET,
-  ENV_CHAINE_GROUPE,
+  TYPE_SIGNAL_AMORCAGE,
+  TYPE_SIGNAL_CLIQUET,
+  TYPE_SIGNAL_CHAINE_GROUPE,
+  CLE_SCELLEE_MAX_OCTETS,
   ENVELOPPES_MAX,
   CORPS_MAX_OCTETS,
   EnveloppeInvalide,
@@ -34,8 +35,8 @@ const MON_APPAREIL = 10;
 const envoiValide = () => ({
   body: { ct: b64(64), nonce: b64(NONCE_OCTETS) },
   envelopes: [
-    { appareilId: 20, header: '{"n":0}', envType: ENV_CLIQUET, wrappedKey: b64(48) },
-    { appareilId: 11, header: '{"n":0}', envType: ENV_AMORCAGE, wrappedKey: b64(48) },
+    { appareilId: 20, header: '{"n":0}', envType: TYPE_SIGNAL_CLIQUET, wrappedKey: b64(48) },
+    { appareilId: 11, header: '{"n":0}', envType: TYPE_SIGNAL_AMORCAGE, wrappedKey: b64(48) },
   ],
 });
 
@@ -113,7 +114,7 @@ refuse(
   {
     body: envoiValide().body,
     envelopes: Array.from({ length: ENVELOPPES_MAX + 1 }, (_, i) => ({
-      appareilId: i + 100, header: '{}', envType: ENV_CLIQUET, wrappedKey: b64(48),
+      appareilId: i + 100, header: '{}', envType: TYPE_SIGNAL_CLIQUET, wrappedKey: b64(48),
     })),
   },
   'E2EE_ENVELOPPES_TROP', 'lot au-delà du plafond',
@@ -125,8 +126,8 @@ refuse(
   {
     body: envoiValide().body,
     envelopes: [
-      { appareilId: 20, header: '{"n":0}', envType: ENV_CLIQUET, wrappedKey: b64(48) },
-      { appareilId: 20, header: '{"n":1}', envType: ENV_CLIQUET, wrappedKey: b64(48) },
+      { appareilId: 20, header: '{"n":0}', envType: TYPE_SIGNAL_CLIQUET, wrappedKey: b64(48) },
+      { appareilId: 20, header: '{"n":1}', envType: TYPE_SIGNAL_CLIQUET, wrappedKey: b64(48) },
     ],
   },
   'E2EE_ENVELOPPE_DOUBLON', 'deux enveloppes pour un même appareil',
@@ -138,7 +139,7 @@ refuse(
   {
     body: envoiValide().body,
     envelopes: [{
-      appareilId: MON_APPAREIL, header: '{}', envType: ENV_CLIQUET, wrappedKey: b64(48),
+      appareilId: MON_APPAREIL, header: '{}', envType: TYPE_SIGNAL_CLIQUET, wrappedKey: b64(48),
     }],
   },
   'E2EE_ENVELOPPE_EMETTEUR', 'enveloppe adressée à l\'émetteur lui-même',
@@ -148,9 +149,42 @@ refuse(
   { body: envoiValide().body, envelopes: [{ appareilId: 0, header: '{}', envType: 2, wrappedKey: b64(48) }] },
   'E2EE_ENVELOPPE_INVALIDE', 'appareilId nul',
 );
+// En-tête facultatif : un message Signal porte déjà le sien dans `wrappedKey`.
+assert.strictEqual(
+  normaliseChiffre({
+    body: envoiValide().body,
+    envelopes: [{ appareilId: 20, envType: TYPE_SIGNAL_AMORCAGE, wrappedKey: b64(184) }],
+  }, MON_APPAREIL).enveloppes[0].header,
+  '',
+  'sans en-tête : chaîne vide, la colonne est NOT NULL',
+);
 refuse(
-  { body: envoiValide().body, envelopes: [{ appareilId: 20, header: '', envType: 2, wrappedKey: b64(48) }] },
-  'E2EE_ENVELOPPE_INVALIDE', 'en-tête vide',
+  { body: envoiValide().body, envelopes: [{ appareilId: 20, header: { n: 0 }, envType: 2, wrappedKey: b64(48) }] },
+  'E2EE_ENVELOPPE_INVALIDE', 'en-tête qui n\'est pas une chaîne',
+);
+
+// Taille de la clé scellée : 184 octets mesurés pour un amorçage, 512 au plus.
+assert.strictEqual(
+  normaliseChiffre({
+    body: envoiValide().body,
+    envelopes: [{ appareilId: 20, envType: TYPE_SIGNAL_AMORCAGE, wrappedKey: b64(CLE_SCELLEE_MAX_OCTETS) }],
+  }, MON_APPAREIL).enveloppes[0].wrappedKey.length,
+  CLE_SCELLEE_MAX_OCTETS,
+  'le plafond lui-même passe',
+);
+refuse(
+  {
+    body: envoiValide().body,
+    envelopes: [{ appareilId: 20, envType: TYPE_SIGNAL_AMORCAGE, wrappedKey: b64(CLE_SCELLEE_MAX_OCTETS + 1) }],
+  },
+  'E2EE_ENVELOPPE_INVALIDE', 'clé scellée au-delà de 512 octets',
+);
+
+// Les valeurs, pas seulement les noms : ce sont celles de libsignal_protocol_dart
+// (`CiphertextMessage.whisperType` = 2, `prekeyType` = 3, `senderKeyType` = 4).
+assert.deepStrictEqual(
+  [TYPE_SIGNAL_CLIQUET, TYPE_SIGNAL_AMORCAGE, TYPE_SIGNAL_CHAINE_GROUPE],
+  [2, 3, 4],
 );
 refuse(
   { body: envoiValide().body, envelopes: [null] },
@@ -159,21 +193,21 @@ refuse(
 
 // ── L'asymétrie des types : la clé scellée ───────────────────────────────
 //
-// Deux-à-deux (1, 2) : la clé de contenu est scellée par le cliquet, donc
+// Deux-à-deux (3, 2) : la clé de contenu est scellée par la session, donc
 // `wrappedKey` est obligatoire — sans elle, rien ne s'ouvre.
-// Chaîne de groupe (3) : la clé se DÉRIVE de la chaîne que le destinataire
+// Chaîne de groupe (4) : la clé se DÉRIVE de la chaîne que le destinataire
 // détient déjà, donc `wrappedKey` n'a pas lieu d'être — sa présence signale
 // une confusion de chemin côté client, pas une variante acceptable.
 
 refuse(
-  { body: envoiValide().body, envelopes: [{ appareilId: 20, header: '{}', envType: ENV_CLIQUET }] },
+  { body: envoiValide().body, envelopes: [{ appareilId: 20, header: '{}', envType: TYPE_SIGNAL_CLIQUET }] },
   'E2EE_ENVELOPPE_TYPE', 'cliquet sans clé scellée',
 );
 refuse(
   {
     body: envoiValide().body,
     envelopes: [{
-      appareilId: 20, header: '{}', envType: ENV_CHAINE_GROUPE, wrappedKey: b64(48),
+      appareilId: 20, header: '{}', envType: TYPE_SIGNAL_CHAINE_GROUPE, wrappedKey: b64(48),
     }],
   },
   'E2EE_ENVELOPPE_TYPE', 'chaîne de groupe AVEC clé scellée',
@@ -186,10 +220,10 @@ refuse(
 // Une chaîne de groupe sans clé scellée : c'est la forme correcte.
 const groupe = normaliseChiffre({
   body: envoiValide().body,
-  envelopes: [{ appareilId: 20, header: '{"c":4}', envType: ENV_CHAINE_GROUPE }],
+  envelopes: [{ appareilId: 20, header: '{"c":4}', envType: TYPE_SIGNAL_CHAINE_GROUPE }],
 }, MON_APPAREIL);
 assert.strictEqual(groupe.enveloppes[0].wrappedKey, null);
-assert.strictEqual(groupe.enveloppes[0].envType, ENV_CHAINE_GROUPE);
+assert.strictEqual(groupe.enveloppes[0].envType, TYPE_SIGNAL_CHAINE_GROUPE);
 
 // ── Ce qui part vers le client ───────────────────────────────────────────
 
@@ -348,6 +382,16 @@ assert.strictEqual(
   // appareil : rien n'est greffé. Le client affichera « illisible sur cet
   // appareil », ce qui est la vérité — et non une bulle vide.
   assert.ok(!('body' in page[2]));
+
+  // Servir n'est pas remettre : la lecture n'écrit RIEN. `delivered_at` ne
+  // se pose qu'à l'accusé explicite de l'appareil (`e2ee:ack`), une fois le
+  // message rangé — sinon un téléphone qui s'arrête en plein déchiffrement
+  // perdrait le message pour toujours (docs/e2ee, chapitre 11).
+  await new Promise((r) => setImmediate(r));
+  assert.ok(
+    !lues.some((l) => /UPDATE/.test(l.sql)),
+    'aucune écriture pendant une lecture d\'historique',
+  );
 
   console.log('messageEnvelopes.test.js OK');
 })().catch((e) => {
