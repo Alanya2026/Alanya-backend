@@ -33,6 +33,14 @@
 -- refusé à l'écriture. 512 laisse la marge d'un futur message post-quantique
 -- sans ouvrir la porte à des blocs arbitraires.
 --
+-- ── 3. `message_e2ee.sender_appareil_id` ──
+--
+-- L'appareil qui a chiffré. Le destinataire en a besoin pour choisir la
+-- session Signal qui déchiffre : un compte a plusieurs appareils, chacun sa
+-- session. Le serveur peut mentir sur cette valeur, mais le déchiffrement
+-- échoue alors — c'est la session de l'émetteur qui authentifie le message
+-- (docs/e2ee, chapitre 21).
+--
 -- ── `env_type` : les numéros de Signal ──
 --
 -- Le commentaire posé par 092 (« 1=amorcage 2=cliquet 3=chaine de groupe »)
@@ -58,4 +66,12 @@ SET @sql := IF(@len IS NOT NULL AND @len < 512, 'ALTER TABLE message_envelope
     MODIFY COLUMN env_type TINYINT NOT NULL
       COMMENT ''Type Signal : 3=amorcage (PreKey) 2=cliquet 4=chaine de groupe''',
   'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @has := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message_e2ee'
+    AND COLUMN_NAME = 'sender_appareil_id');
+SET @sql := IF(@has = 0, 'ALTER TABLE message_e2ee
+    ADD COLUMN sender_appareil_id BIGINT NULL
+      COMMENT ''Appareil émetteur : choisit la session qui déchiffre''', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

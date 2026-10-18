@@ -149,6 +149,12 @@ refuse(
   { body: envoiValide().body, envelopes: [{ appareilId: 0, header: '{}', envType: 2, wrappedKey: b64(48) }] },
   'E2EE_ENVELOPPE_INVALIDE', 'appareilId nul',
 );
+// L'appareil émetteur est celui de la socket, jamais un champ du corps.
+assert.strictEqual(
+  normaliseChiffre({ ...envoiValide(), emetteurAppareilId: 999 }, MON_APPAREIL).emetteurAppareilId,
+  MON_APPAREIL,
+);
+
 // En-tête facultatif : un message Signal porte déjà le sien dans `wrappedKey`.
 assert.strictEqual(
   normaliseChiffre({
@@ -377,6 +383,9 @@ assert.strictEqual(
   );
   assert.strictEqual(page[1].body.ct, Buffer.alloc(8, 1).toString('base64'));
   assert.strictEqual(page[1].envelope.header, '{"n":5}');
+  // L'appareil émetteur part avec le corps : sans lui, le destinataire ne
+  // saurait pas quelle session déchiffre (un compte, plusieurs appareils).
+  assert.ok('senderAppareilId' in page[1].body);
   assert.ok(!('body' in page[0]), 'la ligne en clair reste intacte');
   // Le message 8 est chiffré mais n'a ni corps ni enveloppe pour cet
   // appareil : rien n'est greffé. Le client affichera « illisible sur cet

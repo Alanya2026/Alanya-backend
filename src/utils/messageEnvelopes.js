@@ -196,7 +196,15 @@ function normaliseChiffre(data = {}, emetteurId = null) {
     return { appareilId, header, envType, wrappedKey: scellee };
   });
 
-  return { body: octets, nonce, enveloppes: propres };
+  // L'appareil émetteur vient de la socket ou du jeton, jamais du corps de
+  // la requête. Le destinataire en a besoin pour choisir la session qui
+  // déchiffre : un compte a plusieurs appareils, chacun sa session.
+  return {
+    body: octets,
+    nonce,
+    enveloppes: propres,
+    emetteurAppareilId: emetteurId != null ? Number(emetteurId) : null,
+  };
 }
 
 /**
@@ -213,9 +221,9 @@ function normaliseChiffre(data = {}, emetteurId = null) {
  */
 async function ecritChiffre(conn, msgID, chiffre) {
   await conn.execute(
-    `INSERT INTO message_e2ee (msgID, body, nonce) VALUES (?, ?, ?)
+    `INSERT INTO message_e2ee (msgID, body, nonce, sender_appareil_id) VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE body = VALUES(body), nonce = VALUES(nonce)`,
-    [msgID, chiffre.body, chiffre.nonce],
+    [msgID, chiffre.body, chiffre.nonce, chiffre.emetteurAppareilId ?? null],
   );
 
   const place = [];
@@ -253,6 +261,8 @@ function chiffrePourClient(corpsLigne, enveloppeLigne) {
     body: {
       ct: corpsLigne.body.toString('base64'),
       nonce: corpsLigne.nonce.toString('base64'),
+      senderAppareilId: corpsLigne.sender_appareil_id != null
+        ? Number(corpsLigne.sender_appareil_id) : null,
     },
     envelope: {
       appareilId: Number(enveloppeLigne.appareil_id),
@@ -279,7 +289,7 @@ async function chargeChiffrePourAppareil(conn, msgIDs, appareilId) {
   if (ids.length === 0 || !appareilId) return new Map();
 
   const [corps] = await conn.query(
-    'SELECT msgID, body, nonce FROM message_e2ee WHERE msgID IN (?)',
+    'SELECT msgID, body, nonce, sender_appareil_id FROM message_e2ee WHERE msgID IN (?)',
     [ids],
   );
   if (corps.length === 0) return new Map();
