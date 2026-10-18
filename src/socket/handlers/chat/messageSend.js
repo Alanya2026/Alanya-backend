@@ -22,6 +22,7 @@ const {
   emetEnveloppes,
 } = require('./envelopeRouting');
 const { peutPublier } = require('../../../services/e2eeSettingsService');
+const { refusEnvoi, filChiffre } = require('../../../utils/e2eePolicy');
 const { getSenderIdentity } = require('../../../utils/senderIdentityCache');
 const { buildSentPayload } = require('../../../utils/sentMessagePayload');
 const { MEDIA_THUMB_SELECT } = require('../../../utils/messageThumbSql');
@@ -376,6 +377,29 @@ const messageSend = (io, socket) => {
         });
       }
       const { silentDrop } = sendPolicy;
+
+      // Fil chiffré : pas de texte en clair ; fil en clair : pas de corps
+      // chiffré. Après l'appartenance, avant toute écriture. Même règle que le
+      // chemin HTTP (`utils/e2eePolicy`). Le refus porte son code : le client
+      // sait rejouer par le chemin chiffré, au lieu de laisser sa bulle
+      // tourner (docs/e2ee, chapitre 3).
+      const refusE2ee = refusEnvoi({
+        filChiffre: await filChiffre(conversationID),
+        chiffre,
+        type,
+        content,
+        replyToContent,
+      });
+      if (refusE2ee) {
+        emitSendFailed(socket, {
+          clientId,
+          code: refusE2ee,
+          message: refusE2ee === 'CONVERSATION_CHIFFREE'
+            ? 'Cette conversation est chiffrée : le texte en clair est refusé'
+            : 'Cette conversation n\'est pas chiffrée',
+        });
+        return;
+      }
 
       // Sticker : le serveur relit le `sid` en base et réécrit `content`,
       // `mediaUrl` et `mediaName` — ceux du client sont ignorés. Même fonction
