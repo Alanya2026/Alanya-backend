@@ -43,7 +43,8 @@ if (!/^(127\.0\.0\.1|localhost)$/.test(hote) || !/_test$/.test(base)) {
 const pool = require('../../config/db');
 const { createSafeboxService } = require('./service');
 const { normalize } = require('./settings');
-const { runSafeboxPurge, collectOrphans, reconcile } = require('./purge');
+const { runSafeboxPurge, collectOrphans, reconcile, reconcileFull } = require('./purge');
+const { encryptPreview } = require('./cipher');
 const { resolveSafeboxShareFields } = require('../../utils/safeboxShareMessage');
 const { SafeboxError } = require('./errors');
 const { Mio, BLOCK_BYTES } = require('../../constants/safebox');
@@ -53,9 +54,17 @@ const env = { SAFEBOX_KEY: crypto.randomBytes(32).toString('base64') };
 function fauxStockage() {
   const objets = new Map();
   const ages = new Map();
+  const contenus = new Map(); // octets des rares objets lus par le serveur (aperçus)
   return {
     objets,
     ages,
+    contenus,
+    getSmall: async (key, max) => {
+      const c = contenus.get(key);
+      if (!c || !objets.has(key)) throw new Error(`NoSuchKey ${key}`);
+      if (c.length > max) throw new Error('trop gros');
+      return c;
+    },
     listPage: async (prefix) => ({
       objects: [...objets]
         .filter(([k]) => k.startsWith(prefix))
@@ -606,6 +615,105 @@ test('rapprochement : objets sans fichier en base supprimés après deux jours',
   const avant = stockage.objets.size;
   assert.strictEqual(await reconcile(pool, stockage, { alertFloor: 10, trigger: 'manual' }), 0, 'les vrais blocs ne bougent pas');
   assert.strictEqual(stockage.objets.size, avant);
+});
+
+// ── Modération et fichiers perdus (décisions du 18/10/2026, points 7 et 8) ──
+
+test('modération : aperçu, retrait de tous les partages, suppression partout', async () => {
+  const Ex = await compte('expediteur-signale');
+  const Dx = await compte('destinataire-x');
+  const Rx = await compte('troisieme-x');
+  const [c] = await pool.query('INSERT INTO conversation () VALUES ()');
+  const convX = c.insertId;
+  await pool.query('INSERT INTO conv_participants (conversID, alanyaID) VALUES (?, ?), (?, ?), (?, ?)',
+    [convX, Ex, convX, Dx, convX, Rx]);
+  const racinesEx = Object.fromEntries((await svc.overview(Ex)).roots.map((r) => [r.root, r.id]));
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(200)]);
+  const apercuChiffre = encryptPreview(cle, jpeg);
+  const r = await svc.reserveUpload(Ex, {
+    folderId: racinesEx.albums, name: 'Signalee.jpg', size: 40, plainSize: 40,
+    previewSize: apercuChiffre.length, cipherFormat: 'E2C1',
+  });
+  const prefixe = deposer(r);
+  stockage.contenus.set(`${prefixe}apercu`, apercuChiffre);
+  const f = await svc.completeUpload(Ex, r.fileId, { key: cle.toString('base64') });
+  const p = await svc.createShare(Ex, { fileId: f.id, conversationId: convX });
+  // Le destinataire l'enregistre puis le renvoie lui-même dans la discussion.
+  const copie = await svc.saveShare(Dx, p.shareId);
+  const p2 = await svc.createShare(Dx, { fileId: copie.id, conversationId: convX });
+
+  // A : ce que voit la modération.
+  const vu = await svc.moderationView(p.shareId);
+  assert.ok(vu.preview.startsWith('data:image/jpeg;base64,'));
+  assert.ok(Buffer.from(vu.preview.split(',')[1], 'base64').equals(jpeg), 'aperçu déchiffré par le serveur');
+  assert.strictEqual(vu.vaults, 2);
+  assert.strictEqual(vu.activeShares, 2);
+  assert.strictEqual(vu.fileDeleted, false);
+  await refuse(svc.moderationView(999999999), 'SAFEBOX_NOT_FOUND');
+
+  // B : plus personne ne télécharge, d'aucun des deux partages ; les copies restent.
+  assert.strictEqual((await svc.moderationRevoke(p.shareId)).revoked, 2);
+  const carte = await svc.shareInfo(Rx, p.shareId);
+  assert.strictEqual(carte.available, false);
+  assert.strictEqual(carte.removedByModeration, true);
+  await refuse(svc.shareDownload(Rx, p2.shareId), 'SAFEBOX_SHARE_REVOKED');
+  await refuse(svc.saveShare(Rx, p.shareId), 'SAFEBOX_SHARE_REVOKED');
+  assert.strictEqual((await svc.downloadFile(Dx, copie.id)).blocks.length, 1, 'la copie enregistrée reste');
+  assert.strictEqual((await svc.moderationRevoke(p.shareId)).revoked, 0, 'rejouable');
+
+  // C : supprimé partout, chez MEGA aussi.
+  const sup = await svc.moderationDelete(p.shareId);
+  assert.deepStrictEqual({ files: sup.files, vaults: sup.vaults, megaDeleted: sup.megaDeleted }, { files: 2, vaults: 2, megaDeleted: true });
+  assert.ok(![...stockage.objets.keys()].some((k) => k.startsWith(prefixe)), 'plus rien chez MEGA');
+  await refuse(svc.downloadFile(Dx, copie.id), 'SAFEBOX_NOT_FOUND');
+  await refuse(svc.downloadFile(Ex, f.id), 'SAFEBOX_NOT_FOUND');
+  assert.strictEqual((await svc.usageOf(Dx)).usedBytes, 0, 'l\'espace revient');
+  const apres = await svc.moderationView(p.shareId);
+  assert.strictEqual(apres.fileDeleted, true);
+  assert.strictEqual(apres.preview, null);
+});
+
+test('fichiers perdus chez MEGA : marqués, refusés, démarqués s\'ils reviennent (migration 106)', async () => {
+  const [[col]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'safebox_blob' AND COLUMN_NAME = 'lost_at'`,
+  );
+  const avec106 = Number(col.n) > 0;
+  const P = await compte('proprietaire-perdu');
+  const racinesP = Object.fromEntries((await svc.overview(P)).roots.map((r) => [r.root, r.id]));
+  const r = await svc.reserveUpload(P, { folderId: racinesP.documents, name: 'Acte.pdf', size: 10, plainSize: 10, cipherFormat: 'E2C1' });
+  const prefixe = deposer(r);
+  const f = await svc.completeUpload(P, r.fileId, { key: cle.toString('base64') });
+  const plusTard = new Date(Date.now() + 5000);
+  const bloc = `${prefixe}00001`;
+  const taille = stockage.objets.get(bloc);
+  stockage.objets.delete(bloc); // disparu chez MEGA
+
+  const r1 = await reconcileFull(pool, stockage, { alertFloor: 10, trigger: 'manual', now: plusTard });
+  const lu = async () => (await svc.listFolder(P, racinesP.documents)).files.find((x) => x.id === f.id);
+  if (!avec106) {
+    assert.strictEqual(r1.perdus, null);
+    assert.strictEqual((await lu()).lost, false);
+    stockage.objets.set(bloc, taille);
+    return;
+  }
+  assert.ok(r1.perdus >= 1);
+  assert.strictEqual((await lu()).lost, true);
+  const e = await refuse(svc.downloadFile(P, f.id), 'SAFEBOX_FILE_LOST');
+  assert.strictEqual(e.status, 410);
+
+  // Le contenu revient (lecture incomplète la fois d'avant) : démarqué.
+  stockage.objets.set(bloc, taille);
+  const r2 = await reconcileFull(pool, stockage, { alertFloor: 10, trigger: 'manual', now: plusTard });
+  assert.ok(r2.retrouves >= 1);
+  assert.strictEqual((await lu()).lost, false);
+  assert.strictEqual((await svc.downloadFile(P, f.id)).blocks.length, 1);
+
+  // Lecture du bucket qui revient vide : un passage automatique ne marque rien.
+  for (let i = 0; i < 12; i += 1) await deposerFichier(P, racinesP.documents, `lot-${i}.pdf`, 3);
+  const vide = { listPage: async () => ({ objects: [], next: undefined }), removeKeys: async () => {} };
+  await assert.rejects(reconcileFull(pool, vide, { alertFloor: 10, trigger: 'auto', now: plusTard }), /semblent perdus/);
+  assert.strictEqual((await lu()).lost, false, 'rien marqué au-delà du seuil');
 });
 
 (async () => {

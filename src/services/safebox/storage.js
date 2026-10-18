@@ -59,6 +59,19 @@ function createStorage({ client, bucket, sign = getSignedUrl }) {
     return sign(client, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: ttlSeconds });
   }
 
+  /**
+   * Un petit objet en mémoire (l'aperçu d'un fichier signalé, pour la
+   * modération). Refuse au-delà de `maxBytes` : le serveur ne transporte pas
+   * de fichier.
+   */
+  async function getSmall(key, maxBytes) {
+    const rep = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (Number(rep.ContentLength) > maxBytes) throw new Error(`objet de ${rep.ContentLength} octets, au-delà de ${maxBytes}`);
+    const octets = Buffer.from(await rep.Body.transformToByteArray());
+    if (octets.length > maxBytes) throw new Error(`objet de ${octets.length} octets, au-delà de ${maxBytes}`);
+    return octets;
+  }
+
   /** Une page d'objets sous un préfixe (1 000 au plus) et le jeton de la suivante. */
   async function listPage(prefix, token) {
     const rep = await client.send(new ListObjectsV2Command({
@@ -128,7 +141,7 @@ function createStorage({ client, bucket, sign = getSignedUrl }) {
     return objets.length;
   }
 
-  return { uploadUrl, downloadUrl, listPage, list, removeKeys, removePrefix };
+  return { uploadUrl, downloadUrl, getSmall, listPage, list, removeKeys, removePrefix };
 }
 
 let _defaut = null;

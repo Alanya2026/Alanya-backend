@@ -56,6 +56,8 @@ const ACTIONS = {
 
   // Modération
   'POST /reports/:id/actions': { action: 'reports.handle', targetType: 'report', param: 'id' },
+  'POST /reports/:id/safebox/revoke': { action: 'safebox.revoke', targetType: 'report', param: 'id' },
+  'POST /reports/:id/safebox/delete': { action: 'safebox.delete', targetType: 'report', param: 'id' },
 
   // Diffusions
   'POST /broadcasts': { action: 'broadcasts.send', targetType: 'broadcast' },

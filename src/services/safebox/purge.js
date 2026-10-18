@@ -24,6 +24,7 @@
 
 const pool = require('../../config/db');
 const { defaultStorage } = require('./storage');
+const R = require('./rules');
 
 const LOT = 1000;
 
@@ -139,12 +140,22 @@ function prefixeDe(key) {
 }
 
 /**
- * Objets de plus de deux jours dont le blob n'existe pas en base. Parcourt le
- * bucket page par page. Lève, sans rien supprimer, si un passage automatique
- * en trouve plus que `alertFloor`.
+ * Rapprochement entre MEGA et la base, dans les deux sens, en une seule
+ * lecture du bucket (page par page) :
+ *  - les objets de plus de deux jours dont le blob n'existe pas en base sont
+ *    supprimés (place payée pour rien) ;
+ *  - les blobs prêts dont un bloc ou l'aperçu manque chez MEGA sont marqués
+ *    perdus (`lost_at`, migration 106) : l'application dit « Fichier
+ *    endommagé » au lieu d'échouer, l'admin les compte. Un blob retrouvé
+ *    entier est démarqué.
+ * Un passage automatique lève sans rien supprimer ni marquer au-delà des
+ * seuils : une lecture du bucket qui tourne mal ne doit ni vider MEGA ni
+ * déclarer tout le coffre perdu.
+ * @returns {Promise<{ supprimes: number, perdus: number|null, retrouves: number|null }>}
  */
-async function reconcile(db, storage, { alertFloor, trigger = 'auto', now = new Date() }) {
+async function reconcileFull(db, storage, { alertFloor, trigger = 'auto', now = new Date() }) {
   const orphelins = [];
+  const vus = new Map(); // préfixe connu → objets
   let jeton;
   do {
     const page = await storage.listPage('u/', jeton);
@@ -155,7 +166,12 @@ async function reconcile(db, storage, { alertFloor, trigger = 'auto', now = new 
     const enBase = new Set(connus.map((r) => r.prefix));
     for (const o of page.objects) {
       const pre = prefixeDe(o.key);
-      if (!pre || enBase.has(pre)) continue;
+      if (!pre) continue;
+      if (enBase.has(pre)) {
+        if (!vus.has(pre)) vus.set(pre, []);
+        vus.get(pre).push(o);
+        continue;
+      }
       if (o.lastModified && now - o.lastModified < RAPPROCHEMENT_AGE_MS) continue;
       orphelins.push(o.key);
     }
@@ -166,8 +182,58 @@ async function reconcile(db, storage, { alertFloor, trigger = 'auto', now = new 
       + 'rien n\'a été supprimé. Vérifier, puis lancer la purge à la main pour confirmer.',
     );
   }
+  const perte = await marquerPerdus(db, vus, { trigger, avant: now });
   if (orphelins.length) await storage.removeKeys(orphelins);
-  return orphelins.length;
+  return { supprimes: orphelins.length, ...perte };
+}
+
+/** Blobs prêts dont le contenu manque chez MEGA ; null sans la migration 106. */
+async function marquerPerdus(db, vus, { trigger, avant }) {
+  let blobs;
+  try {
+    // Terminés avant le début de la lecture : un envoi achevé pendant qu'on
+    // lisait le bucket n'est pas un fichier perdu.
+    [blobs] = await db.query(
+      `SELECT id, prefix, block_size, block_count, stored_bytes, preview_bytes, lost_at
+         FROM safebox_blob WHERE status = 'ready' AND completed_at < ?`,
+      [avant],
+    );
+  } catch (e) {
+    if (e.code === 'ER_BAD_FIELD_ERROR') return { perdus: null, retrouves: null };
+    throw e;
+  }
+  const perdus = [];
+  const retrouves = [];
+  let manquants = 0;
+  for (const b of blobs) {
+    const etat = R.compareBlocks(vus.get(b.prefix) || [], {
+      prefix: b.prefix,
+      size: Number(b.stored_bytes),
+      blockSize: Number(b.block_size),
+      count: Number(b.block_count),
+      previewSize: Number(b.preview_bytes),
+    });
+    const entier = !etat.manquants.length && !etat.apercuManquant;
+    if (!entier) manquants += 1;
+    if (!entier && !b.lost_at) perdus.push(Number(b.id));
+    if (entier && b.lost_at) retrouves.push(Number(b.id));
+  }
+  // Au-delà de 5 % (et d'une dizaine), c'est la lecture qu'il faut soupçonner.
+  const seuil = Math.max(10, Math.ceil(blobs.length * 0.05));
+  if (trigger !== 'manual' && perdus.length > seuil) {
+    throw new Error(
+      `${perdus.length} fichiers sur ${blobs.length} semblent perdus chez MEGA, au-delà du seuil de ${seuil} : `
+      + 'rien n\'a été marqué. Vérifier le bucket et ses accès, puis lancer la purge à la main pour confirmer.',
+    );
+  }
+  if (perdus.length) await db.query('UPDATE safebox_blob SET lost_at = NOW() WHERE id IN (?) AND lost_at IS NULL', [perdus]);
+  if (retrouves.length) await db.query('UPDATE safebox_blob SET lost_at = NULL WHERE id IN (?)', [retrouves]);
+  return { perdus: manquants, retrouves: retrouves.length };
+}
+
+/** Le premier sens seul (objets sans fichier en base) : nombre d'objets supprimés. */
+async function reconcile(db, storage, opts) {
+  return (await reconcileFull(db, storage, opts)).supprimes;
 }
 
 /** Rapprochement s'il n'a pas eu lieu depuis une semaine ; null sinon. */
@@ -181,9 +247,9 @@ async function reconcileIfDue(db, storage, opts) {
   }
   const quand = derniere?.last_reconcile_at ? new Date(derniere.last_reconcile_at) : null;
   if (opts.trigger !== 'manual' && quand && Date.now() - quand.getTime() < RAPPROCHEMENT_JOURS * 86_400_000) return null;
-  const n = await reconcile(db, storage, opts);
+  const r = await reconcileFull(db, storage, opts);
   await db.query('UPDATE safebox_settings SET last_reconcile_at = NOW() WHERE id = 1');
-  return n;
+  return r;
 }
 
 /** Ce que la purge ferait maintenant, pour la page Admin › Purges. */
@@ -202,12 +268,21 @@ async function purgeStats(opts, { db = pool } = {}) {
     `SELECT COUNT(*) AS blobs, COALESCE(SUM(stored_bytes + preview_bytes), 0) AS octets
        FROM safebox_blob WHERE status = 'ready'`,
   );
+  let perdus = null;
+  try {
+    const [[p]] = await db.query('SELECT COUNT(*) AS n FROM safebox_blob WHERE lost_at IS NOT NULL');
+    perdus = Number(p.n) || 0;
+  } catch (e) {
+    if (e.code !== 'ER_BAD_FIELD_ERROR') throw e; // migration 106 absente
+  }
   return {
     corbeilleEchue: Number(corbeille.n) || 0,
     envoisAbandonnes: Number(abandons.n) || 0,
     orphelins: await countOrphans(db),
     blobsStockes: Number(total.blobs) || 0,
     octetsStockes: Number(total.octets) || 0,
+    // Fichiers dont le contenu manquait chez MEGA au dernier rapprochement.
+    perdusChezMega: perdus,
   };
 }
 
@@ -240,12 +315,19 @@ async function runSafeboxPurge(opts, { trigger = 'auto', db = pool, storage = de
   } catch (e) {
     if (e.code !== 'ER_NO_SUCH_TABLE') throw e; // migration 102 absente
   }
-  const rapproches = await reconcileIfDue(db, storage, { alertFloor: opts.alertFloor, trigger });
-  return { corbeille, abandons, orphelins, ...ramassage, telechargements, rapproches };
+  const r = await reconcileIfDue(db, storage, { alertFloor: opts.alertFloor, trigger });
+  // `rapproches` : objets sans fichier supprimés ; `perdus` : fichiers dont le
+  // contenu manque chez MEGA (null hors passage hebdomadaire ou sans migration 106).
+  return {
+    corbeille, abandons, orphelins, ...ramassage, telechargements,
+    rapproches: r ? r.supprimes : null,
+    perdus: r ? r.perdus : null,
+  };
 }
 
 module.exports = {
   reconcile,
+  reconcileFull,
   reconcileIfDue,
   prefixeDe,
   expireTrash,

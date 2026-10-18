@@ -118,6 +118,9 @@ const SUPER_ADMIN_ONLY = [
   // Réglages du coffre-fort : l'espace offert à chaque inscrit, donc la
   // facture MEGA. Au niveau des purges, pour la même raison.
   'safebox.settings',
+  // Supprimer partout un fichier signalé du coffre, copies enregistrées par
+  // d'autres comprises : irréversible, MEGA ne garde aucune copie.
+  'safebox.delete',
   'trips.purge',
   'settings.write',
   // Rotation des clés de sauvegarde. Au niveau super-admin comme la

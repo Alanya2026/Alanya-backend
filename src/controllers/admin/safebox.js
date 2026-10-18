@@ -108,6 +108,39 @@ const getSafeboxAdmin = async (req, res) => {
     } catch (e) {
       if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
     }
+    // Fichiers dont le contenu manquait chez MEGA au dernier rapprochement
+    // (migration 106) : comptés, et les 50 plus récents nommés, pour prévenir
+    // leurs propriétaires. Sans la migration, null.
+    let perdus = null;
+    try {
+      const [[n]] = await pool.query(
+        `SELECT COUNT(*) AS fichiers FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+          WHERE b.lost_at IS NOT NULL`,
+      );
+      const [liste] = await pool.query(
+        `SELECT f.id, f.name, f.family, f.alanyaID, u.nom, b.plain_bytes, b.lost_at
+           FROM safebox_file f
+           JOIN safebox_blob b ON b.id = f.blob_id
+           LEFT JOIN users u ON u.alanyaID = f.alanyaID
+          WHERE b.lost_at IS NOT NULL
+          ORDER BY b.lost_at DESC, f.id DESC
+          LIMIT 50`,
+      );
+      perdus = {
+        files: nombre(n.fichiers),
+        items: liste.map((l) => ({
+          fileId: Number(l.id),
+          name: l.name,
+          family: l.family,
+          alanyaID: Number(l.alanyaID),
+          ownerName: l.nom,
+          plainBytes: nombre(l.plain_bytes),
+          lostAt: l.lost_at,
+        })),
+      };
+    } catch (e) {
+      if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
+    }
     const reglages = await getSafeboxSettings();
     res.json({
       totals: {
@@ -119,7 +152,9 @@ const getSafeboxAdmin = async (req, res) => {
         pendingUploads: nombre(totaux.envois),
         shares30d: partages.partages30j,
         shareDownloads30d: partages.telechargements30j,
+        lostFiles: perdus ? perdus.files : null,
       },
+      lost: perdus ? perdus.items : null,
       byFamily: Object.fromEntries(ROOTS.map((r) => {
         const l = familles.find((x) => x.family === r);
         return [r, { files: nombre(l?.fichiers), bytes: nombre(l?.octets) }];

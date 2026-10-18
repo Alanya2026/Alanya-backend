@@ -24,6 +24,7 @@ const { keyConfigured, wrapFileKey, unwrapFileKey, accountTag } = require('./key
 const { defaultStorage } = require('./storage');
 const { getSafeboxSettings } = require('./settings');
 const { collectOrphans } = require('./purge');
+const { decryptPreview, imageMime } = require('./cipher');
 const { createPlusSpace } = require('./plusSpace');
 
 const introuvable = () => new SafeboxError('SAFEBOX_NOT_FOUND', 404, 'Introuvable');
@@ -188,25 +189,32 @@ function createSafeboxService({
   });
 
   /**
-   * Durée, définition, pages… de chaque blob (migration 104), en une requête.
-   * Sans la migration, rien : la carte s'affiche sans ces détails.
+   * Pour chaque blob, en une requête : ses détails (durée, définition,
+   * pages…, migration 104) et s'il est perdu chez MEGA (migration 106). Sans
+   * ces migrations, rien : la carte s'affiche sans détails, rien n'est perdu.
    */
-  async function metasDe(blobIds) {
+  async function detailsDe(blobIds) {
     const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
     const out = new Map();
     if (!ids.length) return out;
-    try {
-      const [rows] = await db.query('SELECT id, meta FROM safebox_blob WHERE id IN (?)', [ids]);
-      for (const r of rows) out.set(Number(r.id), R.normalizeMeta(r.meta));
-    } catch (e) {
-      if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
+    for (const colonnes of ['id, meta, lost_at', 'id, meta']) {
+      try {
+        const [rows] = await db.query(`SELECT ${colonnes} FROM safebox_blob WHERE id IN (?)`, [ids]);
+        for (const r of rows) out.set(Number(r.id), { meta: R.normalizeMeta(r.meta), lostAt: r.lost_at ?? null });
+        return out;
+      } catch (e) {
+        if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
+      }
     }
     return out;
   }
 
   async function metaDe(blobId) {
-    return (await metasDe([blobId])).get(Number(blobId)) ?? null;
+    return (await detailsDe([blobId])).get(Number(blobId))?.meta ?? null;
   }
+
+  const perdu = () => new SafeboxError('SAFEBOX_FILE_LOST', 410,
+    "Fichier endommagé : son contenu a été perdu chez l'hébergeur et ne peut pas être récupéré");
 
   /**
    * Ce que sont devenus les partages de ces fichiers, pour le badge de
@@ -256,10 +264,12 @@ function createSafeboxService({
 
   /** Ajoute aux lignes leur `meta` et, sur demande, leur `sent` (badge). */
   async function enrichir(rows, { envois = false } = {}) {
-    const metas = await metasDe(rows.map((f) => f.blob_id));
+    const details = await detailsDe(rows.map((f) => f.blob_id));
     const partages = envois ? await envoisDe(rows.map((f) => f.id)) : new Map();
     for (const f of rows) {
-      f.meta = metas.get(Number(f.blob_id)) ?? null;
+      const d = details.get(Number(f.blob_id));
+      f.meta = d?.meta ?? null;
+      f.lost = Boolean(d?.lostAt);
       if (envois) f.sent = partages.get(Number(f.id)) ?? null;
     }
     return rows;
@@ -291,6 +301,8 @@ function createSafeboxService({
       compressed: Boolean(f.compressed),
       cipherFormat: f.cipher_format,
       meta: f.meta,
+      // Contenu introuvable chez MEGA au dernier rapprochement (migration 106).
+      lost: Boolean(f.lost),
       createdAt: f.created_at,
       updatedAt: f.updated_at,
     };
@@ -609,6 +621,8 @@ function createSafeboxService({
   }
 
   async function planDeTelechargement(storage, f) {
+    if (f.meta === undefined) await enrichir([f]);
+    if (f.lost) throw perdu();
     const count = Number(f.block_count);
     const geo = { size: Number(f.stored_bytes), blockSize: Number(f.block_size), count };
     const blocs = [];
@@ -1033,6 +1047,9 @@ function createSafeboxService({
     plainBytes: Number(s.plain_bytes),
     createdAt: s.created_at,
     available: Boolean(fichier),
+    // Seule la modération retire un partage (le retrait par l'expéditeur
+    // passe par la corbeille) : la carte le dit autrement.
+    removedByModeration: Boolean(s.revoked_at),
     ...extra,
   });
 
@@ -1057,7 +1074,9 @@ function createSafeboxService({
         [alanyaID, fichier.blob_id],
       );
       extra.savedFileId = mien ? Number(mien.id) : null;
-      extra.meta = await metaDe(fichier.blob_id);
+      const d = (await detailsDe([fichier.blob_id])).get(Number(fichier.blob_id));
+      extra.meta = d?.meta ?? null;
+      extra.lost = Boolean(d?.lostAt);
     }
     return shareShape(s, fichier, extra);
   }
@@ -1213,6 +1232,124 @@ function createSafeboxService({
     return { files: fichiers, bytes: octets };
   }
 
+  // ── Modération d'un fichier signalé (décision du 18/10/2026, point 7) ───
+
+  /** Le partage et son fichier, corbeille comprise, sans contrôle d'appartenance : admin seulement. */
+  async function partagePourModeration(shareId) {
+    const id = R.parseId(shareId);
+    if (!id) throw introuvable();
+    const [[s]] = await db.query('SELECT * FROM safebox_share WHERE id = ?', [id]);
+    if (!s) throw introuvable();
+    let fichier = null;
+    if (s.file_id) {
+      const [[f]] = await db.query(`${FICHIER} WHERE f.id = ?`, [s.file_id]);
+      fichier = f || null;
+    }
+    return { s, fichier };
+  }
+
+  /**
+   * A — ce que voit la modération : le partage, son état, jusqu'où le fichier
+   * s'est répandu, et son aperçu déchiffré par le serveur (quelques dizaines
+   * de Ko, jamais le fichier lui-même).
+   */
+  async function moderationView(shareId) {
+    const { s, fichier } = await partagePourModeration(shareId);
+    const out = {
+      id: Number(s.id),
+      conversationId: Number(s.conversation_id),
+      senderId: Number(s.sender_id),
+      name: s.name,
+      mime: s.mime,
+      family: s.family,
+      plainBytes: Number(s.plain_bytes),
+      createdAt: s.created_at,
+      revokedAt: s.revoked_at,
+      fileDeleted: !fichier,
+      trashed: Boolean(fichier?.trashed_at),
+      vaults: 0,
+      activeShares: 0,
+      recipients: null,
+      preview: null,
+      previewError: false,
+    };
+    if (!fichier) return out;
+    const blobId = Number(fichier.blob_id);
+    const [[c]] = await db.query('SELECT COUNT(DISTINCT alanyaID) AS n FROM safebox_file WHERE blob_id = ?', [blobId]);
+    out.vaults = Number(c.n);
+    const [[p]] = await db.query(
+      `SELECT COUNT(*) AS n FROM safebox_share sh JOIN safebox_file f ON f.id = sh.file_id
+        WHERE f.blob_id = ? AND sh.revoked_at IS NULL`,
+      [blobId],
+    );
+    out.activeShares = Number(p.n);
+    try {
+      const [[r]] = await db.query(
+        `SELECT COUNT(DISTINCT r.alanyaID) AS n FROM safebox_share_recipient r
+           JOIN safebox_share sh ON sh.id = r.share_id JOIN safebox_file f ON f.id = sh.file_id
+          WHERE f.blob_id = ?`,
+        [blobId],
+      );
+      out.recipients = Number(r.n);
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+    }
+    if (Number(fichier.preview_bytes) > 0 && fichier.status === 'ready' && fichier.wrapped_key) {
+      try {
+        const chiffre = await ready().getSmall(R.previewKey(fichier.prefix), C.MAX_PREVIEW_BYTES + 64);
+        const clair = decryptPreview(unwrapFileKey(fichier.wrapped_key, fichier.blob_id, env), chiffre);
+        const type = imageMime(clair);
+        if (type) out.preview = `data:${type};base64,${clair.toString('base64')}`;
+      } catch (e) {
+        console.error(`[Coffre] aperçu du partage ${s.id} illisible pour la modération :`, e.message);
+        out.previewError = true;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * B — retire tous les partages actifs de ce contenu, quel que soit celui
+   * qui l'a envoyé (un destinataire a pu le renvoyer). Les copies déjà
+   * enregistrées dans des coffres restent : c'est C qui les efface.
+   */
+  async function moderationRevoke(shareId) {
+    const { s, fichier } = await partagePourModeration(shareId);
+    let n = 0;
+    if (fichier) {
+      const [r] = await db.query(
+        `UPDATE safebox_share sh JOIN safebox_file f ON f.id = sh.file_id
+            SET sh.revoked_at = NOW()
+          WHERE f.blob_id = ? AND sh.revoked_at IS NULL`,
+        [fichier.blob_id],
+      );
+      n += r.affectedRows;
+    }
+    const [r2] = await db.query('UPDATE safebox_share SET revoked_at = NOW() WHERE id = ? AND revoked_at IS NULL', [s.id]);
+    return { revoked: n + r2.affectedRows };
+  }
+
+  /**
+   * C — supprime le fichier partout : le coffre de l'expéditeur, les copies
+   * enregistrées par d'autres, puis les blocs chez MEGA. Irréversible. Les
+   * partages sont retirés d'abord : plus aucun « Enregistrer dans mon coffre »
+   * ne peut désigner le blob pendant la suppression.
+   */
+  async function moderationDelete(shareId) {
+    const storage = ready();
+    const { fichier } = await partagePourModeration(shareId);
+    const { revoked } = await moderationRevoke(shareId);
+    if (!fichier) return { revoked, files: 0, vaults: 0, megaDeleted: false };
+    const blobId = Number(fichier.blob_id);
+    const [[c]] = await db.query(
+      'SELECT COUNT(*) AS n, COUNT(DISTINCT alanyaID) AS comptes FROM safebox_file WHERE blob_id = ?',
+      [blobId],
+    );
+    await db.query('DELETE FROM safebox_file WHERE blob_id = ?', [blobId]);
+    const ramassage = await collectOrphans(db, storage, { blobIds: [blobId] });
+    return { revoked, files: Number(c.n), vaults: Number(c.comptes), megaDeleted: ramassage.supprimes === 1 };
+  }
+
   return {
     overview,
     listFolder,
@@ -1230,6 +1367,9 @@ function createSafeboxService({
     shareDownload,
     saveShare,
     purgeExcess,
+    moderationView,
+    moderationRevoke,
+    moderationDelete,
     reserveUpload,
     uploadUrls,
     uploadStatus,

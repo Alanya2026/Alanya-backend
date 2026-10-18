@@ -1,6 +1,6 @@
 /**
  * Espace du coffre-fort d'un compte — lot 4 (décision du 15/10/2026 : l'espace
- * en plus est vendu avec Alanya Plus, 50 Go au total, réglable par plan).
+ * en plus est vendu avec Alanya Plus, 25 Go au total depuis le 18/10, réglable par plan).
  *
  * Même règle de couverture que les fichiers de 200 Mo des discussions
  * (`billing/uploadLimits.js`) : phase payante, période en cours ou compte
@@ -11,7 +11,7 @@
  *
  * Une panne de la base ou une migration 103 absente donne l'espace de base :
  * refuser un dépôt à un abonné le temps d'une panne est un moindre mal que
- * d'offrir 50 Go à qui n'a pas payé.
+ * d'offrir l'espace de Plus à qui n'a pas payé.
  */
 
 const pool = require('../../config/db');

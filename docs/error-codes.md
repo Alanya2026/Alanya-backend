@@ -243,6 +243,7 @@ L'application les traduira au lot 2 ; d'ici là, le repli lié au statut s'appli
 | `SAFEBOX_SHARE_INVALID` | 400 | Message de type 11 dont le partage n'est pas à l'expéditeur ou pas à cette discussion (aussi sur `message:send_failed`) |
 | `SAFEBOX_SHARE_REVOKED` | 410 | L'expéditeur a mis le fichier partagé à la corbeille ou l'a supprimé : la carte affiche « Fichier retiré par l'expéditeur » |
 | `SAFEBOX_DOWNLOAD_LIMIT` | 429 | Trop de téléchargements de ce fichier partagé sur 24 h (`limit` joint) ; l'expéditeur n'est jamais limité |
+| `SAFEBOX_FILE_LOST` | 410 | Le contenu du fichier a disparu chez MEGA (rapprochement hebdomadaire, migration 106) : l'application affiche « Fichier endommagé », rien ne se récupère |
 
 ## Codes venus du socket, pas de HTTP
 
@@ -253,7 +254,7 @@ et c'est normal.
 
 ## Tous les codes HTTP émis
 
-Le backend émet **282 codes** en réponse HTTP. 56 d'entre eux ont
+Le backend émet **283 codes** en réponse HTTP. 57 d'entre eux ont
 une phrase dédiée dans l'application ; les 226 suivants sont valides et rendus par
 le repli lié au statut. Leur donner une phrase est une amélioration, pas un
 correctif — un code non traduit ne fait rien afficher de brut.
@@ -321,7 +322,7 @@ correctif — un code non traduit ne fait rien afficher de brut.
 - `RATE_LIMITED` · `REASON_REQUIRED` · `RECIPIENT_NOT_FOUND`
 - `REFRESH_INVALID` · `REFRESH_TOKEN_REQUIRED` · `REPORT_NOT_FOUND`
 - `RESERVED_BRAND_NAME` · `ROOM_ENDED` · `SAFEBOX_DOWNLOAD_LIMIT`
-- `SAFEBOX_FILE_TOO_LARGE` · `SAFEBOX_FOLDER_LIMIT` · `SAFEBOX_INVALID_BLOCKS`
+- `SAFEBOX_FILE_LOST` · `SAFEBOX_FILE_TOO_LARGE` · `SAFEBOX_FOLDER_LIMIT` · `SAFEBOX_INVALID_BLOCKS`
 - `SAFEBOX_INVALID_CIPHER` · `SAFEBOX_INVALID_KEY` · `SAFEBOX_INVALID_MOVE`
 - `SAFEBOX_INVALID_NAME` · `SAFEBOX_INVALID_SIZE` · `SAFEBOX_NAME_TAKEN`
 - `SAFEBOX_NOT_FOUND` · `SAFEBOX_QUOTA_EXCEEDED` · `SAFEBOX_ROOT_LOCKED`

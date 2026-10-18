@@ -13,6 +13,9 @@ const { adminAudit } = require('../middleware/adminAudit');
 router.use(adminAudit);
 const { getPurges, updatePurge, runPurgeNow } = require('../controllers/admin/purges');
 const { getSafeboxAdmin, updateSafeboxSettings } = require('../controllers/admin/safebox');
+const {
+  getReportSafebox, revokeReportSafebox, deleteReportSafebox,
+} = require('../controllers/admin/safeboxModeration');
 const { getServiceHealth } = require('../controllers/admin/health');
 const { getAudit, getAuditActions } = require('../controllers/admin/audit');
 const {
@@ -839,6 +842,25 @@ router.post('/backup/keys/:kid/retire',     adminAuth, requirePermission('backup
 router.get('/reports',                     adminAuth, requirePermission('reports.read'), getReports);
 router.get('/reports/:id/actions',         adminAuth, requirePermission('reports.read'), getReportActions);
 router.post('/reports/:id/actions',        adminAuth, requirePermission('reports.handle'), postReportAction);
+
+/**
+ * @swagger
+ * /api/admin/reports/{id}/safebox:
+ *   get:
+ *     summary: "Fichier du coffre d'un signalement : état, étendue et aperçu déchiffré"
+ *     tags: [Admin]
+ * /api/admin/reports/{id}/safebox/revoke:
+ *   post:
+ *     summary: "Retirer tous les partages du fichier signalé (plus aucun téléchargement)"
+ *     tags: [Admin]
+ * /api/admin/reports/{id}/safebox/delete:
+ *   post:
+ *     summary: "Supprimer le fichier signalé partout, copies enregistrées comprises (super-admin)"
+ *     tags: [Admin]
+ */
+router.get('/reports/:id/safebox',         adminAuth, requirePermission('reports.read'), getReportSafebox);
+router.post('/reports/:id/safebox/revoke', adminAuth, requirePermission('reports.handle'), revokeReportSafebox);
+router.post('/reports/:id/safebox/delete', adminAuth, requirePermission('safebox.delete'), deleteReportSafebox);
 
 /**
  * @swagger

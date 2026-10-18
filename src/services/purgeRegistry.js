@@ -399,7 +399,9 @@ const DESCRIPTORS = {
       + 'la lancer à la main vaut confirmation. Les fichiers du coffre ne '
       + "s'effacent jamais par ancienneté. Elle efface aussi les traces de "
       + 'téléchargement de fichiers partagés de plus de 31 jours et, une fois par '
-      + 'semaine, les objets restés chez MEGA sans fichier en base (plus de deux jours).',
+      + 'semaine, les objets restés chez MEGA sans fichier en base (plus de deux jours). '
+      + 'Ce même passage repère les fichiers dont le contenu a disparu chez MEGA : '
+      + 'ils sont signalés, jamais supprimés, et la page Coffre-fort les liste.',
     knobs: [{
       key: 'trashDays',
       label: 'Durée de la corbeille',
