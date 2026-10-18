@@ -21,6 +21,7 @@ const {
   normaliseAppareilIds,
 } = require('../services/e2eePrekeyStock');
 const { appareilsDeConversation } = require('../utils/conversationDevices');
+const { activerSiEligible } = require('../services/e2eeActivation');
 
 /**
  * Exige un `appareilId` sur le jeton.
@@ -182,7 +183,13 @@ const getConversationDevices = async (req, res) => {
     if (!r) {
       return fail(res, 404, 'NOT_A_MEMBER', 'Conversation introuvable ou non autorisée');
     }
-    res.json(r);
+    // C'est ici que la conversation passe en chiffré, quand elle le peut : le
+    // moment où un appareil demande pour qui chiffrer est le seul où la
+    // question se pose. `e2eeSince` nul : on écrit en clair, comme avant.
+    const { e2eeSince } = await activerSiEligible(conversationID, {
+      io: req.app.get('io'),
+    });
+    res.json({ ...r, e2eeSince });
   } catch (e) {
     repondErreur(res, e, 'appareils de conversation');
   }
