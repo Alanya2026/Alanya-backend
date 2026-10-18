@@ -180,4 +180,17 @@ test('espace : la réservation doit tenir', () => {
   assert.ok(!R.fitsQuota({ usedBytes: 9 * Gio, quotaBytes: 10 * Gio, addBytes: Gio + 1 }));
 });
 
+test('détails de la carte : seulement ce qui est attendu, dans les bornes', () => {
+  assert.deepStrictEqual(
+    R.normalizeMeta({ durationMs: 767000, width: 1920, height: 1080, pages: 4, title: '  Ma\u0007   chanson ', artist: 'X', autre: 1 }),
+    { durationMs: 767000, width: 1920, height: 1080, pages: 4, title: 'Ma chanson', artist: 'X' },
+  );
+  assert.deepStrictEqual(R.normalizeMeta('{"pages":12}'), { pages: 12 }, 'relu depuis la colonne JSON');
+  assert.deepStrictEqual(R.normalizeMeta({ width: 1920 }), null, 'une définition va par paire');
+  assert.strictEqual(R.normalizeMeta({ durationMs: -1, pages: 1.5, title: '   ' }), null);
+  assert.strictEqual(R.normalizeMeta({ durationMs: 8 * 86_400_000 }), null);
+  assert.strictEqual([...R.normalizeMeta({ title: 'é'.repeat(300) }).title].length, 120);
+  for (const v of [null, undefined, 'pas du json', '[1]', [1], 3]) assert.strictEqual(R.normalizeMeta(v), null);
+});
+
 console.log(`safebox/rules : ${ok} tests passés`);

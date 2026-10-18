@@ -16,6 +16,10 @@ const test = (nom, fn) => etapes.push([nom, fn]);
 /** Faux pool : un seul partage, n° 7, de l'inscrit 3 dans la discussion 50. */
 const fauxDb = {
   async query(sql, [id, sender, conv]) {
+    // Détails relevés au dépôt (migration 104), lus par le fichier du partage.
+    if (sql.includes('b.meta')) {
+      return id === 7 ? [[{ meta: '{"durationMs":767000,"width":1920,"height":1080,"pirate":"x"}' }]] : [[]];
+    }
     if (id === 7 && sender === 3 && conv === 50) {
       return [[{ id: 7, name: 'Mariage.mp4', mime: 'video/mp4', family: 'videos', plain_bytes: 880803840 }]];
     }
@@ -31,7 +35,10 @@ test('un autre type ne passe pas par ici', async () => {
 test('contenu réécrit par le serveur, repli lisible pour les anciennes applications', async () => {
   const r = await resoudre({ content: JSON.stringify({ v: 1, share: 7, name: 'menteur.exe', size: 1 }) });
   const c = JSON.parse(r.content);
-  assert.deepStrictEqual(c, { v: 1, share: 7, name: 'Mariage.mp4', size: 880803840, mime: 'video/mp4', family: 'videos' });
+  assert.deepStrictEqual(c, {
+    v: 1, share: 7, name: 'Mariage.mp4', size: 880803840, mime: 'video/mp4', family: 'videos',
+    meta: { durationMs: 767000, width: 1920, height: 1080 },
+  });
   assert.strictEqual(r.mediaUrl, null);
   assert.strictEqual(r.mediaName, '📦 Mariage.mp4 · 840 Mo');
 });

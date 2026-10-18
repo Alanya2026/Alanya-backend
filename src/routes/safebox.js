@@ -92,7 +92,9 @@ router.post('/folders/:id/restore', auth, ecriture, c.restoreFolder);
  *   post:
  *     summary: Réserver l'espace d'un fichier et obtenir les adresses d'envoi de ses blocs
  *     description: >
- *       Corps : `{ folderId, name, mime, size, plainSize, originalSize?, compressed?, previewSize?, cipherFormat }`.
+ *       Corps : `{ folderId, name, mime, size, plainSize, originalSize?, compressed?, previewSize?, cipherFormat, meta? }`.
+ *       `meta` (facultatif, migration 104) : `{ durationMs?, width?, height?, pages?, title?, artist? }`,
+ *       relevé par le téléphone et affiché par la carte d'un fichier partagé ; un champ hors bornes est ignoré.
  *       `size` est la taille chiffrée, découpée en blocs de 8 Mio ; chaque adresse signée impose la taille de son bloc.
  *     tags: [Safebox]
  *     security:

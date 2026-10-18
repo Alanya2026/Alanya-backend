@@ -187,8 +187,96 @@ function createSafeboxService({
     updatedAt: f.updated_at,
   });
 
+  /**
+   * Durée, définition, pages… de chaque blob (migration 104), en une requête.
+   * Sans la migration, rien : la carte s'affiche sans ces détails.
+   */
+  async function metasDe(blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    const out = new Map();
+    if (!ids.length) return out;
+    try {
+      const [rows] = await db.query('SELECT id, meta FROM safebox_blob WHERE id IN (?)', [ids]);
+      for (const r of rows) out.set(Number(r.id), R.normalizeMeta(r.meta));
+    } catch (e) {
+      if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
+    }
+    return out;
+  }
+
+  async function metaDe(blobId) {
+    return (await metasDe([blobId])).get(Number(blobId)) ?? null;
+  }
+
+  /**
+   * Ce que sont devenus les partages de ces fichiers, pour le badge de
+   * l'expéditeur : partages actifs, destinataires (membres actuels des
+   * discussions, expéditeur exclu), et ceux d'entre eux qui l'ont reçu
+   * (téléchargé ou enregistré dans leur coffre). `received` est null sans la
+   * migration 104 ; sans la 102, aucun fichier n'a de partage.
+   */
+  async function envoisDe(fileIds) {
+    const ids = [...new Set(fileIds.map(Number).filter(Boolean))];
+    const out = new Map();
+    if (!ids.length) return out;
+    try {
+      const [rows] = await db.query(
+        `SELECT s.file_id, COUNT(DISTINCT s.id) AS partages, COUNT(DISTINCT cp.alanyaID) AS destinataires
+           FROM safebox_share s
+           LEFT JOIN conv_participants cp ON cp.conversID = s.conversation_id AND cp.alanyaID <> s.sender_id
+          WHERE s.file_id IN (?) AND s.revoked_at IS NULL
+          GROUP BY s.file_id`,
+        [ids],
+      );
+      for (const r of rows) {
+        out.set(Number(r.file_id), { shares: Number(r.partages), recipients: Number(r.destinataires), received: null });
+      }
+    } catch (e) {
+      if (e.code === 'ER_NO_SUCH_TABLE') return out;
+      throw e;
+    }
+    if (!out.size) return out;
+    try {
+      const [rows] = await db.query(
+        `SELECT s.file_id, COUNT(DISTINCT r.alanyaID) AS recus
+           FROM safebox_share s
+           JOIN safebox_share_recipient r ON r.share_id = s.id
+           JOIN conv_participants cp ON cp.conversID = s.conversation_id AND cp.alanyaID = r.alanyaID
+          WHERE s.file_id IN (?) AND s.revoked_at IS NULL
+          GROUP BY s.file_id`,
+        [[...out.keys()]],
+      );
+      for (const v of out.values()) v.received = 0;
+      for (const r of rows) out.get(Number(r.file_id)).received = Number(r.recus);
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+    }
+    return out;
+  }
+
+  /** Ajoute aux lignes leur `meta` et, sur demande, leur `sent` (badge). */
+  async function enrichir(rows, { envois = false } = {}) {
+    const metas = await metasDe(rows.map((f) => f.blob_id));
+    const partages = envois ? await envoisDe(rows.map((f) => f.id)) : new Map();
+    for (const f of rows) {
+      f.meta = metas.get(Number(f.blob_id)) ?? null;
+      if (envois) f.sent = partages.get(Number(f.id)) ?? null;
+    }
+    return rows;
+  }
+
+  /** Un destinataire a reçu le fichier (une ligne pour toujours, migration 104). */
+  async function noterDestinataire(shareId, alanyaID) {
+    try {
+      await db.query('INSERT IGNORE INTO safebox_share_recipient (share_id, alanyaID) VALUES (?, ?)', [shareId, alanyaID]);
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+    }
+  }
+
   /** Un fichier tel que l'application l'affiche, clé comprise (le propriétaire seul le voit). */
   async function fileShape(f, storage) {
+    if (f.meta === undefined) await enrichir([f]);
     const prefix = f.prefix;
     const out = {
       id: Number(f.id),
@@ -202,9 +290,11 @@ function createSafeboxService({
       originalBytes: f.original_bytes == null ? null : Number(f.original_bytes),
       compressed: Boolean(f.compressed),
       cipherFormat: f.cipher_format,
+      meta: f.meta,
       createdAt: f.created_at,
       updatedAt: f.updated_at,
     };
+    if (f.sent !== undefined) out.sent = f.sent;
     if (f.wrapped_key) out.key = unwrapFileKey(f.wrapped_key, f.blob_id, env).toString('base64');
     out.previewUrl = Number(f.preview_bytes) > 0
       ? await storage.downloadUrl(R.previewKey(prefix), C.PREVIEW_URL_TTL_S)
@@ -248,7 +338,7 @@ function createSafeboxService({
       folder: folderShape(dossier),
       breadcrumbs: ascendance.map(folderShape),
       folders: sousDossiers,
-      files: await Promise.all(fichiers.map((f) => fileShape(f, storage))),
+      files: await Promise.all((await enrichir(fichiers, { envois: true })).map((f) => fileShape(f, storage))),
       nextCursor: fichiers.length === C.PAGE_SIZE ? Number(fichiers[fichiers.length - 1].id) : null,
     };
   }
@@ -561,6 +651,7 @@ function createSafeboxService({
       [alanyaID],
     );
     const { trashBytes } = await usageOf(db, alanyaID);
+    await enrichir(rows, { envois: true });
     return {
       trashBytes,
       files: await Promise.all(rows.map(async (f) => ({
@@ -605,7 +696,7 @@ function createSafeboxService({
     const quotaBytes = await quotaFor(alanyaID, settings);
     await ensureAccount(alanyaID);
 
-    const { fileId, blob } = await tx(async (conn) => {
+    const { fileId, blobId, blob } = await tx(async (conn) => {
       // Verrou du compte : deux réservations simultanées ne dépassent pas l'espace.
       await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
       const dossier = await liveFolder(conn, alanyaID, body.folderId);
@@ -630,12 +721,21 @@ function createSafeboxService({
       );
       return {
         fileId: f.insertId,
+        blobId: b.insertId,
         blob: {
           prefix, stored_bytes: tailles.size, block_size: C.BLOCK_BYTES, block_count: count,
           preview_bytes: tailles.previewSize,
         },
       };
     });
+    const meta = R.normalizeMeta(body.meta);
+    if (meta) {
+      try {
+        await db.query('UPDATE safebox_blob SET meta = ? WHERE id = ?', [JSON.stringify(meta), blobId]);
+      } catch (e) {
+        if (e.code !== 'ER_BAD_FIELD_ERROR') throw e; // migration 104 absente : sans détails
+      }
+    }
 
     const premiers = [];
     for (let n = 1; n <= Math.min(count, C.BLOCK_URLS_PER_CALL); n += 1) premiers.push(n);
@@ -780,7 +880,7 @@ function createSafeboxService({
         storedBytes: Number(d.octets),
         files: Number(d.fichiers),
       })),
-      files: await Promise.all(fichiers.map(async (f) => ({
+      files: await Promise.all((await enrichir(fichiers)).map(async (f) => ({
         ...(await fileShape(f, storage)),
         trashedAt: f.trashed_at,
         purgeAt: echeance(f.trashed_at),
@@ -885,6 +985,7 @@ function createSafeboxService({
       mime: f.mime,
       family: f.family,
       plainBytes: Number(f.plain_bytes),
+      meta: await metaDe(f.blob_id),
     };
   }
 
@@ -956,6 +1057,7 @@ function createSafeboxService({
         [alanyaID, fichier.blob_id],
       );
       extra.savedFileId = mien ? Number(mien.id) : null;
+      extra.meta = await metaDe(fichier.blob_id);
     }
     return shareShape(s, fichier, extra);
   }
@@ -988,6 +1090,7 @@ function createSafeboxService({
         }
         await conn.query('INSERT INTO safebox_share_download (share_id, alanyaID) VALUES (?, ?)', [s.id, alanyaID]);
       });
+      await noterDestinataire(s.id, alanyaID);
     }
     const plan = await planDeTelechargement(storage, fichier);
     // Rien du coffre de l'expéditeur (numéro de fichier, dossier) ne sort.
@@ -1003,7 +1106,7 @@ function createSafeboxService({
   async function saveShare(alanyaID, shareId, body = {}) {
     const storage = ready();
     const settings = await getSettings();
-    const { fichier } = await partageVisible(alanyaID, shareId);
+    const { s, fichier } = await partageVisible(alanyaID, shareId);
     if (!fichier) throw retire();
     const quotaBytes = await quotaFor(alanyaID, settings);
     const racines = await ensureAccount(alanyaID);
@@ -1037,6 +1140,7 @@ function createSafeboxService({
       );
       return r.insertId;
     });
+    if (Number(s.sender_id) !== Number(alanyaID)) await noterDestinataire(s.id, alanyaID);
     return fileShape(await liveFile(db, alanyaID, id), storage);
   }
 

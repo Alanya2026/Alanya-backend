@@ -225,6 +225,42 @@ function decodeFileKey(raw) {
   return key;
 }
 
+/**
+ * Ce que la carte d'un fichier partagé affiche en plus de l'image (durée,
+ * définition, pages, titre, artiste), relevé par le téléphone au dépôt. Tout
+ * champ inattendu ou hors bornes est ignoré : ces informations décorent, elles
+ * ne décident de rien.
+ * @returns {object|null}
+ */
+function normalizeMeta(raw) {
+  let src = raw;
+  if (typeof src === 'string') {
+    try { src = JSON.parse(src); } catch { return null; }
+  }
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
+  const entier = (v, max) => (Number.isSafeInteger(v) && v > 0 && v <= max ? v : undefined);
+  const texte = (v) => (typeof v === 'string'
+    // eslint-disable-next-line no-control-regex
+    ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || undefined
+    : undefined);
+  const out = {};
+  const duree = entier(src.durationMs, 7 * 86_400_000);
+  if (duree) out.durationMs = duree;
+  const largeur = entier(src.width, 20_000);
+  const hauteur = entier(src.height, 20_000);
+  if (largeur && hauteur) {
+    out.width = largeur;
+    out.height = hauteur;
+  }
+  const pages = entier(src.pages, 100_000);
+  if (pages) out.pages = pages;
+  for (const k of ['title', 'artist']) {
+    const t = texte(src[k]);
+    if (t) out[k] = t;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /** Vrai si l'espace suffit pour `ajout` octets de plus. */
 function fitsQuota({ usedBytes, quotaBytes, addBytes }) {
   return usedBytes + addBytes <= quotaBytes;
@@ -250,4 +286,5 @@ module.exports = {
   parseId,
   decodeFileKey,
   fitsQuota,
+  normalizeMeta,
 };

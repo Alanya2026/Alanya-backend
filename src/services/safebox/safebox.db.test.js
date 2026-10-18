@@ -19,7 +19,7 @@
  *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
  *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
  *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
- *   for m in 101_safebox 102_safebox_partage; do
+ *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires; do
  *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
@@ -487,6 +487,66 @@ test('un membre qui quitte la discussion perd l\'accès', async () => {
   await pool.query('DELETE FROM conv_participants WHERE conversID = ? AND alanyaID = ?', [conv, D]);
   await refuse(svc.shareInfo(D, p2.shareId), 'SAFEBOX_NOT_FOUND');
   await refuse(svc.shareDownload(D, p2.shareId), 'SAFEBOX_NOT_FOUND');
+});
+
+test('détails de la carte et badge de l\'expéditeur (migration 104, ou son absence tolérée)', async () => {
+  // Sans la migration 104, tout doit marcher quand même : ni détails, ni « reçu par ».
+  const [[col]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'safebox_blob' AND COLUMN_NAME = 'meta'`,
+  );
+  const avec104 = Number(col.n) > 0;
+  const recu = (n) => (avec104 ? n : null);
+  const M = await compte('membre3');
+  const [c] = await pool.query('INSERT INTO conversation () VALUES ()');
+  const conv2 = c.insertId;
+  await pool.query('INSERT INTO conv_participants (conversID, alanyaID) VALUES (?, ?), (?, ?), (?, ?)',
+    [conv2, E, conv2, D, conv2, M]);
+  const racinesE = Object.fromEntries((await svc.overview(E)).roots.map((r) => [r.root, r.id]));
+  const r = await svc.reserveUpload(E, {
+    folderId: racinesE.videos, name: 'Mariage.mp4', size: 30, plainSize: 30, cipherFormat: 'E2C1',
+    meta: { durationMs: 767000, width: 1920, height: 1080, intrus: 'x' },
+  });
+  deposer(r);
+  const f = await svc.completeUpload(E, r.fileId, { key: cle.toString('base64') });
+  const attendu = avec104 ? { durationMs: 767000, width: 1920, height: 1080 } : null;
+  assert.deepStrictEqual(f.meta, attendu);
+  const liste = () => svc.listFolder(E, racinesE.videos).then((p) => p.files.find((x) => x.id === f.id));
+  assert.strictEqual((await liste()).sent, null, 'jamais partagé');
+
+  const p3 = await svc.createShare(E, { fileId: f.id, conversationId: conv2 });
+  assert.deepStrictEqual(p3.meta, attendu);
+  const msg = await resolveSafeboxShareFields(
+    { type: 11, content: JSON.stringify({ v: 1, share: p3.shareId }), senderID: E, conversationID: conv2 },
+    { db: pool },
+  );
+  assert.deepStrictEqual(JSON.parse(msg.content).meta ?? null, attendu, 'la carte du destinataire les reçoit');
+  assert.deepStrictEqual((await svc.shareInfo(D, p3.shareId)).meta, attendu);
+  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 2, received: recu(0) });
+
+  await svc.shareDownload(D, p3.shareId);
+  await svc.shareDownload(D, p3.shareId);
+  await svc.shareDownload(E, p3.shareId); // l'expéditeur ne compte pas
+  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 2, received: recu(1) });
+  const copie = await svc.saveShare(M, p3.shareId);
+  assert.deepStrictEqual(copie.meta, attendu, 'même blob, mêmes détails');
+  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 2, received: recu(2) });
+  // Survit à la purge du journal des téléchargements (31 jours).
+  await pool.query('DELETE FROM safebox_share_download WHERE share_id = ?', [p3.shareId]);
+  assert.strictEqual((await liste()).sent.received, recu(2));
+  const gros = (await svc.largestFiles(E)).files.find((x) => x.id === f.id);
+  assert.deepStrictEqual(gros.sent, { shares: 1, recipients: 2, received: recu(2) });
+
+  // Un destinataire qui quitte la discussion ne compte plus, ni comme destinataire ni comme reçu.
+  await pool.query('DELETE FROM conv_participants WHERE conversID = ? AND alanyaID = ?', [conv2, M]);
+  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 1, received: recu(1) });
+
+  const sans = await svc.reserveUpload(E, {
+    folderId: racinesE.documents, name: 'Note.pdf', size: 5, plainSize: 5, cipherFormat: 'E2C1',
+    meta: { width: 'x', pages: -2 },
+  });
+  deposer(sans);
+  assert.strictEqual((await svc.completeUpload(E, sans.fileId, { key: cle.toString('base64') })).meta, null);
 });
 
 // ── Lot 4 : espace Alanya Plus ─────────────────────────────────────────────

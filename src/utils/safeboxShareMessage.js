@@ -23,6 +23,7 @@
  */
 
 const pool = require('../config/db');
+const { normalizeMeta } = require('../services/safebox/rules');
 
 const SAFEBOX_SHARE_TYPE = 11;
 const SAFEBOX_SHARE_PREVIEW = '📦 Fichier';
@@ -49,15 +50,38 @@ function tailleLisible(octets) {
 }
 
 function lirePayload(content) {
-  if (typeof content !== 'string' || content.length > FLOU_MAX + 500) return null;
+  // Le client renvoie aussi nom, type et détails (repris de toute façon en base).
+  if (typeof content !== 'string' || content.length > FLOU_MAX + 2000) return null;
   try {
     const d = JSON.parse(content);
     if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
     if (!Number.isSafeInteger(d.share) || d.share <= 0) return null;
+    // Une mini-image trop lourde refuse le message entier, pas seulement l'image.
+    if (typeof d.b === 'string' && d.b.length > FLOU_MAX) return null;
     const flou = typeof d.b === 'string' && d.b.length <= FLOU_MAX && /^[A-Za-z0-9+/=]+$/.test(d.b) ? d.b : null;
     return { share: d.share, flou };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Durée, définition, pages… du fichier partagé (migration 104), ou null :
+ * la carte s'affiche alors sans ces détails.
+ */
+async function metaDuPartage(db, shareId) {
+  try {
+    const [[r]] = await db.query(
+      `SELECT b.meta FROM safebox_share s
+         JOIN safebox_file f ON f.id = s.file_id
+         JOIN safebox_blob b ON b.id = f.blob_id
+        WHERE s.id = ?`,
+      [shareId],
+    );
+    return r ? normalizeMeta(r.meta) : null;
+  } catch (e) {
+    if (e.code === 'ER_BAD_FIELD_ERROR') return null;
+    throw e;
   }
 }
 
@@ -84,6 +108,7 @@ async function resolveSafeboxShareFields({
     throw e;
   }
   if (!s) throw new SafeboxShareMessageError();
+  const meta = await metaDuPartage(db, s.id);
   const canonique = {
     v: PAYLOAD_VERSION,
     share: Number(s.id),
@@ -91,6 +116,7 @@ async function resolveSafeboxShareFields({
     size: Number(s.plain_bytes),
     mime: s.mime,
     family: s.family,
+    ...(meta ? { meta } : {}),
     ...(p.flou ? { b: p.flou } : {}),
   };
   return {
