@@ -140,6 +140,9 @@ const MEDIA_MIME_TYPES = [
   'audio/midi', 'audio/x-midi',
   'audio/x-caf', 'audio/amr',
   'video/mp4', 'video/webm', 'video/quicktime', 'video/3gpp',
+  // Photos et vidéos envoyées comme document (HEIC d'iPhone, MKV, AVI…).
+  'image/heic', 'image/heif', 'image/bmp', 'image/tiff',
+  'video/x-matroska', 'video/x-msvideo',
   // Documents
   'application/pdf',
   'application/msword',
@@ -150,17 +153,42 @@ const MEDIA_MIME_TYPES = [
   'application/csv',
   'application/vnd.ms-powerpoint',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  // Office : variantes à macros, modèles et diaporamas. Types en minuscules,
+  // tels que les renvoie le package `mime` côté Flutter.
+  'application/vnd.ms-word.document.macroenabled.12',
+  'application/vnd.ms-word.template.macroenabled.12',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+  'application/vnd.ms-excel.sheet.macroenabled.12',
+  'application/vnd.ms-excel.sheet.binary.macroenabled.12',
+  'application/vnd.ms-excel.template.macroenabled.12',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+  'application/vnd.ms-powerpoint.presentation.macroenabled.12',
+  'application/vnd.ms-powerpoint.slideshow.macroenabled.12',
+  'application/vnd.ms-powerpoint.template.macroenabled.12',
+  'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+  'application/vnd.openxmlformats-officedocument.presentationml.template',
   'application/vnd.oasis.opendocument.text',
   'application/vnd.oasis.opendocument.spreadsheet',
   'application/vnd.oasis.opendocument.presentation',
+  'application/vnd.oasis.opendocument.graphics',
   'application/rtf',
   'text/rtf',
+  'application/epub+zip',
+  'application/vnd.ms-xpsdocument',
+  'text/markdown',
+  'application/json',
+  'text/vcard', 'text/x-vcard',
+  'text/calendar',
   'application/zip',
   'application/x-7z-compressed',
   'application/vnd.rar',
   'application/x-rar-compressed',
+  'application/x-tar',
+  'application/gzip', 'application/x-gzip',
   'application/vnd.android.package-archive',
   'text/plain',
+  // Pas de SVG, HTML ni XML : ouverts dans un navigateur, ils peuvent
+  // exécuter du script. Pas d'exécutables Windows non plus.
 ];
 
 // Filtres de fichiers
@@ -183,7 +211,8 @@ const imageFilter = (req, file, cb) => {
 };
 
 const mediaFilter = (req, file, cb) => {
-  if (MEDIA_MIME_TYPES.includes(file.mimetype)) return cb(null, true);
+  // En minuscules, comme le ticket : l'IANA écrit `macroEnabled`.
+  if (MEDIA_MIME_TYPES.includes(String(file.mimetype || '').toLowerCase())) return cb(null, true);
   cb(new Error(`Type de fichier ${file.mimetype} non autorisé`), false);
 };
 
