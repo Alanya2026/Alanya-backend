@@ -60,8 +60,8 @@ test('extension : minuscules, sans point ; aucune pour un fichier caché ou dout
 });
 
 test('famille : par extension (décision du 15/10/2026)', () => {
-  assert.strictEqual(R.familyOf('jpg', EXT), 'albums');
-  assert.strictEqual(R.familyOf('heic', EXT), 'albums');
+  assert.strictEqual(R.familyOf('jpg', EXT), 'photos');
+  assert.strictEqual(R.familyOf('heic', EXT), 'photos');
   assert.strictEqual(R.familyOf('mp4', EXT), 'videos');
   assert.strictEqual(R.familyOf('opus', EXT), 'audios');
   assert.strictEqual(R.familyOf('pdf', EXT), 'documents');
@@ -73,22 +73,39 @@ test('famille : par extension (décision du 15/10/2026)', () => {
 });
 
 test('famille : un fichier dans le mauvais dossier est refusé, avec le bon dossier', () => {
-  assert.deepStrictEqual(R.assertFamily('albums', 'carte.jpg', EXT), { ext: 'jpg', famille: 'albums' });
-  const e = refuse(() => R.assertFamily('albums', 'acte.pdf', EXT), 'SAFEBOX_WRONG_FAMILY');
+  assert.deepStrictEqual(R.assertFamily('photos', 'carte.jpg', EXT), { ext: 'jpg', famille: 'photos' });
+  const e = refuse(() => R.assertFamily('photos', 'acte.pdf', EXT), 'SAFEBOX_WRONG_FAMILY');
   assert.strictEqual(e.extra.expectedRoot, 'documents');
   refuse(() => R.assertFamily('documents', 'photo.jpg', EXT), 'SAFEBOX_WRONG_FAMILY');
   assert.strictEqual(R.assertFamily('documents', 'LISEZMOI', EXT).famille, 'documents');
 });
 
+test('six dossiers (24/10/2026) : Albums et Partager acceptent tout, avec la famille du fichier', () => {
+  assert.deepStrictEqual(R.assertFamily('albums', 'acte.pdf', EXT), { ext: 'pdf', famille: 'documents' });
+  assert.deepStrictEqual(R.assertFamily('albums', 'plage.heic', EXT), { ext: 'heic', famille: 'photos' });
+  assert.deepStrictEqual(R.assertFamily('partager', 'chantier.zip', EXT), { ext: 'zip', famille: 'documents' });
+  assert.deepStrictEqual(R.assertFamily('partager', 'mariage.mp4', EXT), { ext: 'mp4', famille: 'videos' });
+  assert.strictEqual(R.acceptsFamily('albums', 'videos'), true);
+  assert.strictEqual(R.acceptsFamily('partager', 'audios'), true);
+  assert.strictEqual(R.acceptsFamily('photos', 'videos'), false);
+  assert.strictEqual(R.acceptsFamily('videos', 'videos'), true);
+  // Un nom de dossier n'est pas une famille : « albums » ne sort jamais de familyOf.
+  for (const ext of ['jpg', 'mp4', 'mp3', 'pdf', 'xyz', '']) {
+    assert.ok(['photos', 'videos', 'audios', 'documents'].includes(R.familyOf(ext, EXT)));
+  }
+});
+
 test('extensions : surcharge par famille, les autres gardent celles du code', () => {
-  const e = R.extensionsFrom({ albums: ['.JPG', 'png', 'n\'importe quoi'] });
-  assert.deepStrictEqual(e.albums, ['jpg', 'png']);
+  const e = R.extensionsFrom({ photos: ['.JPG', 'png', 'n\'importe quoi'] });
+  assert.deepStrictEqual(e.photos, ['jpg', 'png']);
   assert.deepStrictEqual(e.videos, [...DEFAULT_EXTENSIONS.videos]);
   // JSON lu tel quel en base, ou illisible.
   assert.deepStrictEqual(R.extensionsFrom('{"audios":["mp3"]}').audios, ['mp3']);
   assert.deepStrictEqual(R.extensionsFrom('pas du json').audios, [...DEFAULT_EXTENSIONS.audios]);
   // Une liste vide ne vide pas la famille.
-  assert.deepStrictEqual(R.extensionsFrom({ albums: [] }).albums, [...DEFAULT_EXTENSIONS.albums]);
+  assert.deepStrictEqual(R.extensionsFrom({ photos: [] }).photos, [...DEFAULT_EXTENSIONS.photos]);
+  // Une liste réglée sous un nom de dossier (« albums ») ne sert à rien.
+  assert.strictEqual(R.extensionsFrom({ albums: ['jpg'] }).albums, undefined);
 });
 
 test('tailles : taille chiffrée cohérente avec la taille en clair', () => {

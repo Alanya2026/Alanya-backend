@@ -5,7 +5,8 @@
  */
 
 const {
-  ROOTS,
+  FAMILIES,
+  OPEN_ROOTS,
   DEFAULT_EXTENSIONS,
   BLOCK_BYTES,
   MAX_PREVIEW_BYTES,
@@ -58,7 +59,7 @@ function extensionsFrom(reglage) {
     try { surcharge = JSON.parse(surcharge); } catch { surcharge = null; }
   }
   const out = {};
-  for (const famille of ROOTS) {
+  for (const famille of FAMILIES) {
     const liste = surcharge && Array.isArray(surcharge[famille]) ? surcharge[famille] : null;
     const propre = liste
       ? liste.map((e) => String(e).toLowerCase().replace(/^\./, '')).filter((e) => /^[a-z0-9]{1,10}$/.test(e))
@@ -70,17 +71,29 @@ function extensionsFrom(reglage) {
 
 /** Famille d'une extension : la première liste qui la contient, sinon « documents ». */
 function familyOf(ext, extensions) {
-  for (const famille of ['albums', 'videos', 'audios']) {
+  for (const famille of ['photos', 'videos', 'audios']) {
     if (ext && extensions[famille].includes(ext)) return famille;
   }
   return 'documents';
 }
 
-/** Refuse un fichier déposé dans un dossier d'une autre famille. */
+/**
+ * Vrai si un dossier de cette racine accepte un fichier de cette famille :
+ * Albums et Partager acceptent tout, les quatre autres seulement la leur.
+ */
+function acceptsFamily(root, famille) {
+  return OPEN_ROOTS.includes(root) || root === famille;
+}
+
+/**
+ * Famille d'un nom de fichier, refusée si le dossier n'en veut pas. Sert
+ * aussi à garder sa famille à un fichier renommé : `root` est alors la
+ * famille actuelle du fichier.
+ */
 function assertFamily(root, nom, extensions) {
   const ext = extensionOf(nom);
   const famille = familyOf(ext, extensions);
-  if (famille !== root) {
+  if (!acceptsFamily(root, famille)) {
     throw new SafeboxError(
       'SAFEBOX_WRONG_FAMILY',
       400,
@@ -313,6 +326,7 @@ module.exports = {
   extensionOf,
   extensionsFrom,
   familyOf,
+  acceptsFamily,
   assertFamily,
   validateSizes,
   validateCipherFormat,

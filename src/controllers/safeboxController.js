@@ -44,7 +44,10 @@ exports.setNoteText = route('setNoteText', (s, req) => s.setNoteText(moi(req), r
 exports.reserveNoteAudio = route('reserveNoteAudio', (s, req) => s.reserveNoteAudio(moi(req), req.params.id, req.body));
 exports.completeNoteAudio = route('completeNoteAudio', (s, req) => s.completeNoteAudio(moi(req), req.params.id, req.body));
 exports.deleteNoteAudio = route('deleteNoteAudio', (s, req) => s.deleteNoteAudio(moi(req), req.params.id));
-exports.trashFile = route('trashFile', (s, req) => s.trashFile(moi(req), req.params.id));
+exports.trashFile = route('trashFile', (s, req) => s.trashFile(moi(req), req.params.id, {
+  everywhere: ['1', 'true'].includes(String(req.query.everywhere)),
+}));
+exports.addToFolder = route('addToFolder', (s, req) => s.addToFolder(moi(req), req.params.id, req.body));
 exports.restoreFile = route('restoreFile', (s, req) => s.restoreFile(moi(req), req.params.id));
 exports.downloadFile = route('downloadFile', (s, req) => s.downloadFile(moi(req), req.params.id));
 exports.createShare = route('createShare', (s, req) => s.createShare(moi(req), req.body), 201);

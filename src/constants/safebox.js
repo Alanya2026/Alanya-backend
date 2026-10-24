@@ -10,8 +10,17 @@ const Kio = 1024;
 const Mio = 1024 * Kio;
 const Gio = 1024 * Mio;
 
-/** Les quatre dossiers racines, dans l'ordre d'affichage. */
-const ROOTS = Object.freeze(['albums', 'videos', 'audios', 'documents']);
+/** Les quatre types de fichiers (la famille), décidés par l'extension. */
+const FAMILIES = Object.freeze(['photos', 'videos', 'audios', 'documents']);
+
+/**
+ * Les six dossiers racines, dans l'ordre d'affichage (décision du
+ * 24/10/2026, migration 108). Les quatre premiers portent le nom d'une
+ * famille et n'acceptent qu'elle : ils se remplissent depuis le téléphone.
+ * Albums et Partager se remplissent à la main et acceptent tout.
+ */
+const OPEN_ROOTS = Object.freeze(['albums', 'partager']);
+const ROOTS = Object.freeze([...FAMILIES, ...OPEN_ROOTS]);
 
 /**
  * Extensions acceptées par famille (décision du 15/10/2026 : la famille se
@@ -19,7 +28,7 @@ const ROOTS = Object.freeze(['albums', 'videos', 'audios', 'documents']);
  * absente des trois premières listes, et les fichiers sans extension.
  */
 const DEFAULT_EXTENSIONS = Object.freeze({
-  albums: Object.freeze(['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'gif']),
+  photos: Object.freeze(['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'gif']),
   videos: Object.freeze(['mp4', 'mov', 'm4v', 'mkv', '3gp', 'webm', 'avi']),
   audios: Object.freeze(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus', 'amr']),
   documents: Object.freeze([
@@ -83,6 +92,8 @@ module.exports = {
   Kio,
   Mio,
   Gio,
+  FAMILIES,
+  OPEN_ROOTS,
   ROOTS,
   DEFAULT_EXTENSIONS,
   DEFAULT_SETTINGS,

@@ -33,7 +33,7 @@ const ecriture = limite(600);
  * @swagger
  * /api/safebox:
  *   get:
- *     summary: Ouvre le coffre (création des quatre dossiers racines à la première visite) — espace, racines, limites
+ *     summary: Ouvre le coffre (création des six dossiers racines à la première visite) — espace, racines, limites
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
@@ -79,12 +79,24 @@ router.get('/', auth, lecture, c.overview);
  *         description: Le dossier créé
  *       409:
  *         description: SAFEBOX_NAME_TAKEN, SAFEBOX_TOO_DEEP ou SAFEBOX_FOLDER_LIMIT
+ * /api/safebox/folders/{id}/files:
+ *   post:
+ *     summary: "Ajouter des fichiers du coffre à un album, sans copie — { fileIds: [...] } (100 au plus)"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "Les exemplaires dans l'album ({ files }) ; un fichier déjà présent n'est pas ajouté deux fois"
+ *       400:
+ *         description: "SAFEBOX_INVALID_MOVE (dossier hors d'Albums, liste vide ou trop longue)"
  */
 router.get('/folders/:id', auth, lecture, c.listFolder);
 router.post('/folders', auth, ecriture, c.createFolder);
 router.patch('/folders/:id', auth, ecriture, c.updateFolder);
 router.delete('/folders/:id', auth, ecriture, c.trashFolder);
 router.post('/folders/:id/restore', auth, ecriture, c.restoreFolder);
+router.post('/folders/:id/files', auth, ecriture, c.addToFolder);
 
 /**
  * @swagger
@@ -145,12 +157,12 @@ router.delete('/uploads/:id', auth, ecriture, c.cancelUpload);
  * @swagger
  * /api/safebox/files/{id}:
  *   patch:
- *     summary: Renommer (`name`, même famille) et/ou déplacer (`folderId`, même famille) un fichier
+ *     summary: "Renommer (`name`, même famille) et/ou déplacer (`folderId` : le dossier de sa famille, Albums ou Partager)"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
  *   delete:
- *     summary: Mettre un fichier à la corbeille
+ *     summary: "Mettre à la corbeille cet exemplaire ; avec `?everywhere=1`, tous les exemplaires du même contenu (Photos et albums)"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []

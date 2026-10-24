@@ -42,11 +42,13 @@ test('taille Plus jamais plus petite que la taille standard', () => {
 });
 
 test('extensions : familles connues, minuscules, sans point, sans doublon ; null = celles du code', () => {
-  const r = lire({ extensions: { albums: ['.JPG', 'png', 'jpg'] } });
-  assert.deepStrictEqual(r.value.extensions, { albums: ['jpg', 'png'] });
+  const r = lire({ extensions: { photos: ['.JPG', 'png', 'jpg'] } });
+  assert.deepStrictEqual(r.value.extensions, { photos: ['jpg', 'png'] });
   assert.deepStrictEqual(lire({ extensions: null }).value, { extensions: null });
-  assert.strictEqual(lire({ extensions: { photos: ['jpg'] } }).ok, false);
-  assert.strictEqual(lire({ extensions: { albums: ['j p g'] } }).ok, false);
+  // Albums et Partager sont des dossiers, pas des types de fichiers (24/10/2026).
+  assert.strictEqual(lire({ extensions: { albums: ['jpg'] } }).ok, false);
+  assert.strictEqual(lire({ extensions: { partager: ['jpg'] } }).ok, false);
+  assert.strictEqual(lire({ extensions: { photos: ['j p g'] } }).ok, false);
   assert.strictEqual(lire({ extensions: ['jpg'] }).ok, false);
 });
 

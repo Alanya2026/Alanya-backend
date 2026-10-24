@@ -12,7 +12,7 @@
 
 const pool = require('../../config/db');
 const { fail, failInternal } = require('../../utils/apiError');
-const { ROOTS } = require('../../constants/safebox');
+const { FAMILIES } = require('../../constants/safebox');
 const { getSafeboxSettings, invalidateSafeboxSettings } = require('../../services/safebox/settings');
 
 const Gio = 1024 ** 3;
@@ -44,11 +44,11 @@ function parseSafeboxSettingsPatch(body) {
     if (src.extensions === null) {
       value.extensions = null;
     } else if (typeof src.extensions !== 'object' || Array.isArray(src.extensions)) {
-      return { ok: false, message: 'extensions : un objet { albums: [...], videos: [...], … } ou null' };
+      return { ok: false, message: 'extensions : un objet { photos: [...], videos: [...], … } ou null' };
     } else {
       const propre = {};
       for (const [famille, liste] of Object.entries(src.extensions)) {
-        if (!ROOTS.includes(famille)) return { ok: false, message: `extensions : famille inconnue « ${famille} »` };
+        if (!FAMILIES.includes(famille)) return { ok: false, message: `extensions : famille inconnue « ${famille} »` };
         if (!Array.isArray(liste) || liste.some((e) => typeof e !== 'string' || !/^\.?[a-z0-9]{1,10}$/i.test(e))) {
           return { ok: false, message: `extensions.${famille} : liste d'extensions (lettres et chiffres, 10 au plus)` };
         }
@@ -155,7 +155,7 @@ const getSafeboxAdmin = async (req, res) => {
         lostFiles: perdus ? perdus.files : null,
       },
       lost: perdus ? perdus.items : null,
-      byFamily: Object.fromEntries(ROOTS.map((r) => {
+      byFamily: Object.fromEntries(FAMILIES.map((r) => {
         const l = familles.find((x) => x.family === r);
         return [r, { files: nombre(l?.fichiers), bytes: nombre(l?.octets) }];
       })),

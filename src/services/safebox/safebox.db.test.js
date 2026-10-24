@@ -19,7 +19,7 @@
  *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
  *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
  *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
- *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires; do
+ *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers; do
  *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
@@ -139,13 +139,17 @@ let racinesA;
 let mariage;
 let video;
 
-test('ouverture : quatre racines, une seule fois même en parallèle', async () => {
+test('ouverture : six racines, une seule fois même en parallèle', async () => {
   A = await compte('coffre-a');
   B = await compte('coffre-b');
   const vues = await Promise.all([svc.overview(A), svc.overview(A), svc.overview(A)]);
   const [[n]] = await pool.query('SELECT COUNT(*) AS n FROM safebox_folder WHERE alanyaID = ?', [A]);
-  assert.strictEqual(Number(n.n), 4);
-  assert.deepStrictEqual(vues[0].roots.map((r) => r.root), ['albums', 'videos', 'audios', 'documents']);
+  assert.strictEqual(Number(n.n), 6);
+  assert.deepStrictEqual(
+    vues[0].roots.map((r) => r.root),
+    ['photos', 'videos', 'audios', 'documents', 'albums', 'partager'],
+  );
+  assert.deepStrictEqual(Object.keys(vues[0].quota.byRoot), ['photos', 'videos', 'audios', 'documents', 'albums', 'partager']);
   assert.deepStrictEqual(vues[0].roots, vues[2].roots);
   assert.strictEqual(vues[0].quota.quotaBytes, 50 * Mio);
   assert.strictEqual(vues[0].quota.usedBytes, 0);
@@ -158,7 +162,7 @@ test('dossiers : création, nom pris (casse ignorée), profondeur bornée', asyn
   assert.strictEqual(mariage.root, 'videos');
   await refuse(svc.createFolder(A, { parentId: racinesA.videos, name: 'mariage' }), 'SAFEBOX_NAME_TAKEN');
   // Même nom ailleurs : permis.
-  await svc.createFolder(A, { parentId: racinesA.albums, name: 'Mariage' });
+  await svc.createFolder(A, { parentId: racinesA.photos, name: 'Mariage' });
   let p = mariage;
   for (let i = 2; i <= 5; i += 1) p = await svc.createFolder(A, { parentId: p.id, name: `n${i}` });
   assert.strictEqual(p.depth, 5);
@@ -166,7 +170,7 @@ test('dossiers : création, nom pris (casse ignorée), profondeur bornée', asyn
 });
 
 test('dossiers : plafond par compte', async () => {
-  // 1 (Mariage) + 1 (albums/Mariage) + 4 (n2..n5) = 6 ; le plafond est 8.
+  // 1 (Mariage) + 1 (photos/Mariage) + 4 (n2..n5) = 6 ; le plafond est 8.
   await svc.createFolder(A, { parentId: racinesA.documents, name: 'Banque' });
   const sante = await svc.createFolder(A, { parentId: racinesA.documents, name: 'Santé' });
   await refuse(svc.createFolder(A, { parentId: racinesA.documents, name: 'Trop' }), 'SAFEBOX_FOLDER_LIMIT');
@@ -193,10 +197,12 @@ test('dossiers : renommer, déplacer avec la descendance, garde-fous', async () 
   assert.strictEqual(f.path, `/${cible.parentId}/${autre.id}/${sous.id}/${feuille.id}/`);
   assert.strictEqual(Number(f.depth), 3);
   await refuse(svc.updateFolder(B, autre.id, { parentId: feuille.id }), 'SAFEBOX_INVALID_MOVE');
-  const albumsB = (await svc.overview(B)).roots[0].id;
-  await refuse(svc.updateFolder(B, autre.id, { parentId: albumsB }), 'SAFEBOX_WRONG_FAMILY');
-  await refuse(svc.updateFolder(B, albumsB, { name: 'Photos' }), 'SAFEBOX_ROOT_LOCKED');
-  await refuse(svc.trashFolder(B, albumsB), 'SAFEBOX_ROOT_LOCKED');
+  const racinesB = Object.fromEntries((await svc.overview(B)).roots.map((r) => [r.root, r.id]));
+  await refuse(svc.updateFolder(B, autre.id, { parentId: racinesB.photos }), 'SAFEBOX_WRONG_FAMILY');
+  // Un dossier reste dans sa racine, même vers Albums qui accepte tous les fichiers.
+  await refuse(svc.updateFolder(B, autre.id, { parentId: racinesB.albums }), 'SAFEBOX_WRONG_FAMILY');
+  await refuse(svc.updateFolder(B, racinesB.photos, { name: 'Images' }), 'SAFEBOX_ROOT_LOCKED');
+  await refuse(svc.trashFolder(B, racinesB.partager), 'SAFEBOX_ROOT_LOCKED');
 });
 
 test('envoi : famille, espace réservé, blocs manquants, fin, clé', async () => {
@@ -272,6 +278,7 @@ test('plus gros fichiers : triés par poids, avec leur dossier, d\'un seul compt
   assert.deepStrictEqual(r.files.map((f) => f.name), ['Cérémonie.mp4', 'petit.pdf']);
   assert.strictEqual(r.files[0].folderName, 'Mariage');
   assert.strictEqual(r.files[1].folderName, null, 'racine : nom traduit par l\'application');
+  assert.strictEqual(r.files[1].folderRoot, 'documents');
   assert.strictEqual(r.trashBytes, 0);
   assert.strictEqual((await svc.largestFiles(B)).files.length, 0);
   assert.strictEqual((await svc.largestFiles(A, { limit: 1 })).files.length, 1);
@@ -281,13 +288,17 @@ test('plus gros fichiers : triés par poids, avec leur dossier, d\'un seul compt
   await svc.emptyTrash(A);
 });
 
-test('fichiers : renommer et déplacer dans la famille seulement', async () => {
+test('fichiers : renommer dans la famille ; déplacer vers sa famille, Albums ou Partager', async () => {
   const f = await svc.updateFile(A, video.fileId, { name: 'Cérémonie.mov' });
   assert.strictEqual(f.ext, 'mov');
   await refuse(svc.updateFile(A, video.fileId, { name: 'Cérémonie.pdf' }), 'SAFEBOX_WRONG_FAMILY');
-  await refuse(svc.updateFile(A, video.fileId, { folderId: racinesA.albums }), 'SAFEBOX_WRONG_FAMILY');
+  await refuse(svc.updateFile(A, video.fileId, { folderId: racinesA.photos }), 'SAFEBOX_WRONG_FAMILY');
   const g = await svc.updateFile(A, video.fileId, { folderId: racinesA.videos });
   assert.strictEqual(g.folderId, racinesA.videos);
+  assert.strictEqual((await svc.updateFile(A, video.fileId, { folderId: racinesA.albums })).folderId, racinesA.albums);
+  const p = await svc.updateFile(A, video.fileId, { folderId: racinesA.partager });
+  assert.strictEqual(p.folderId, racinesA.partager);
+  assert.strictEqual(p.family, 'videos', 'le type ne change pas avec le dossier');
   await svc.updateFile(A, video.fileId, { folderId: mariage.id });
 });
 
@@ -408,6 +419,57 @@ async function deposerFichier(qui, folderId, name, taille = 10) {
   deposer(r);
   return svc.completeUpload(qui, r.fileId, { key: cle.toString('base64') });
 }
+
+test('six dossiers (24/10/2026) : types acceptés, un contenu à plusieurs endroits compté une fois', async () => {
+  const M = await compte('six-dossiers');
+  const racines = Object.fromEntries((await svc.overview(M)).roots.map((r) => [r.root, r.id]));
+  // Les dossiers automatiques n'acceptent que leur type ; Albums et Partager tout.
+  await refuse(svc.reserveUpload(M, {
+    folderId: racines.photos, name: 'acte.pdf', size: 10, plainSize: 10, cipherFormat: 'E2C1',
+  }), 'SAFEBOX_WRONG_FAMILY');
+  const zip = await deposerFichier(M, racines.partager, 'chantier.zip', 40);
+  assert.strictEqual(zip.family, 'documents');
+  const clip = await deposerFichier(M, racines.albums, 'danse.mp4', 20);
+  assert.strictEqual(clip.family, 'videos');
+
+  const photo = await deposerFichier(M, racines.photos, 'Plage.jpg', 30);
+  const avant = await svc.usageOf(M);
+  const kribi = await svc.createFolder(M, { parentId: racines.albums, name: 'Kribi 2026' });
+  const { files: [copie] } = await svc.addToFolder(M, kribi.id, { fileIds: [photo.id] });
+  assert.notStrictEqual(copie.id, photo.id);
+  assert.strictEqual(copie.folderId, kribi.id);
+  assert.strictEqual(copie.family, 'photos');
+  assert.deepStrictEqual(copie.alsoIn, [{ fileId: photo.id, folderId: racines.photos, root: 'photos', folderName: null }]);
+  // Pas de copie chez MEGA, pas de place en plus.
+  assert.deepStrictEqual(await svc.usageOf(M), avant);
+  // Ajouté deux fois : un seul exemplaire.
+  assert.strictEqual((await svc.addToFolder(M, kribi.id, { fileIds: [photo.id, copie.id] })).files.every((f) => f.id === copie.id), true);
+  await refuse(svc.addToFolder(M, racines.photos, { fileIds: [photo.id] }), 'SAFEBOX_INVALID_MOVE');
+  await refuse(svc.addToFolder(M, kribi.id, { fileIds: [] }), 'SAFEBOX_INVALID_MOVE');
+  await refuse(svc.addToFolder(M, kribi.id, { fileIds: [video.fileId] }), 'SAFEBOX_NOT_FOUND'); // fichier d'un autre
+  const dansPhotos = (await svc.listFolder(M, racines.photos)).files.find((f) => f.id === photo.id);
+  assert.deepStrictEqual(dansPhotos.alsoIn, [{ fileId: copie.id, folderId: kribi.id, root: 'albums', folderName: 'Kribi 2026' }]);
+
+  // Par racine, chaque contenu une fois, dans la première racine où il se trouve.
+  const parRacine = (await svc.overview(M)).quota.byRoot;
+  assert.strictEqual(parRacine.photos.files, 1);
+  assert.strictEqual(parRacine.albums.files, 1, 'seulement la vidéo déposée dans Albums');
+  assert.strictEqual(parRacine.partager.files, 1);
+  // « Libérer de l'espace » ne montre le contenu qu'une fois.
+  assert.strictEqual((await svc.largestFiles(M)).files.filter((f) => f.name === 'Plage.jpg').length, 1);
+
+  // Retirer de l'album seulement : la photo reste dans Photos, rien n'est libéré.
+  assert.strictEqual((await svc.trashFile(M, copie.id)).trashed, 1);
+  assert.strictEqual((await svc.usageOf(M)).trashBytes, 0, 'vider la corbeille ne libérerait rien');
+  assert.deepStrictEqual((await svc.listFolder(M, racines.photos)).files.find((f) => f.id === photo.id).alsoIn, []);
+  await svc.restoreFile(M, copie.id);
+  // Supprimer partout : les deux exemplaires, puis la place à la corbeille vidée.
+  assert.strictEqual((await svc.trashFile(M, photo.id, { everywhere: true })).trashed, 2);
+  assert.strictEqual((await svc.usageOf(M)).trashBytes, 30);
+  await svc.emptyTrash(M);
+  assert.strictEqual((await svc.usageOf(M)).usedBytes, avant.usedBytes - 30);
+  await refuse(svc.downloadFile(M, copie.id), 'SAFEBOX_NOT_FOUND');
+});
 
 test('partage : seulement un fichier à moi, dans une discussion dont je suis membre', async () => {
   E = await compte('expediteur');
@@ -631,7 +693,7 @@ test('modération : aperçu, retrait de tous les partages, suppression partout',
   const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(200)]);
   const apercuChiffre = encryptPreview(cle, jpeg);
   const r = await svc.reserveUpload(Ex, {
-    folderId: racinesEx.albums, name: 'Signalee.jpg', size: 40, plainSize: 40,
+    folderId: racinesEx.photos, name: 'Signalee.jpg', size: 40, plainSize: 40,
     previewSize: apercuChiffre.length, cipherFormat: 'E2C1',
   });
   const prefixe = deposer(r);
@@ -723,9 +785,9 @@ test('commentaire d\'une photo : texte, audio, privé, compté dans l\'espace (m
   );
   const K = await compte('photographe');
   const racinesK = Object.fromEntries((await svc.overview(K)).roots.map((r) => [r.root, r.id]));
-  const photo = await deposerFichier(K, racinesK.albums, 'Plage.jpg', 30);
+  const photo = await deposerFichier(K, racinesK.photos, 'Plage.jpg', 30);
   const pdf = await deposerFichier(K, racinesK.documents, 'Contrat.pdf', 30);
-  const vue = async () => (await svc.listFolder(K, racinesK.albums)).files.find((x) => x.id === photo.id);
+  const vue = async () => (await svc.listFolder(K, racinesK.photos)).files.find((x) => x.id === photo.id);
   if (!Number(t.n)) {
     assert.strictEqual((await vue()).note, null, 'sans la migration 107 : pas de commentaire, rien ne casse');
     return;
@@ -767,7 +829,7 @@ test('commentaire d\'une photo : texte, audio, privé, compté dans l\'espace (m
   assert.ok(!('note' in plan.file), 'le commentaire ne part pas avec la photo');
   const copie = await svc.saveShare(Q, p.shareId);
   const racinesQ = Object.fromEntries((await svc.overview(Q)).roots.map((r) => [r.root, r.id]));
-  assert.strictEqual((await svc.listFolder(Q, racinesQ.albums)).files.find((x) => x.id === copie.id).note, null);
+  assert.strictEqual((await svc.listFolder(Q, racinesQ.photos)).files.find((x) => x.id === copie.id).note, null);
 
   // Le rapprochement ne prend pas l'audio pour un objet orphelin.
   stockage.ages.set(objet2, new Date(Date.now() - 10 * 86_400_000));

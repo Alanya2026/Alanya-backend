@@ -76,10 +76,38 @@ function createSafeboxService({
 
   const doublon = (e) => e && e.code === 'ER_DUP_ENTRY';
 
+  /**
+   * La migration 108 (six dossiers) doit être passée : sans elle, l'insertion
+   * des racines « photos » et « partager » créerait des lignes vides (INSERT
+   * IGNORE sur un ENUM qui ne les connaît pas) et le type « photos » serait
+   * refusé. Le coffre répond alors « indisponible » sans rien écrire. Seule la
+   * réponse positive est gardée : appliquer la migration suffit, sans
+   * redémarrer.
+   */
+  let sixDossiers = false;
+  async function assertSixDossiers() {
+    if (sixDossiers) return;
+    const [[c]] = await db.query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'safebox_folder' AND COLUMN_NAME = 'root'
+          AND COLUMN_TYPE LIKE '%''partager''%'`,
+    );
+    if (!Number(c.n)) {
+      console.error('[Coffre] migration 108_safebox_six_dossiers.sql absente : coffre indisponible');
+      throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort indisponible');
+    }
+    sixDossiers = true;
+  }
+
   // ── Compte et dossiers racines ───────────────────────────────────────────
 
-  /** Ouvre le coffre à sa première visite : la ligne du compte et les quatre racines. */
+  /**
+   * Ouvre le coffre à sa première visite : la ligne du compte et les six
+   * racines. Un coffre ouvert avant le 24/10/2026 reçoit ici « albums » et
+   * « partager » à sa visite suivante.
+   */
   async function ensureAccount(alanyaID) {
+    await assertSixDossiers();
     await db.query('INSERT IGNORE INTO safebox_account (alanyaID) VALUES (?)', [alanyaID]);
     const lire = async () => {
       const [rows] = await db.query(
@@ -110,13 +138,23 @@ function createSafeboxService({
     return parRacine;
   }
 
+  /**
+   * Ce que le coffre occupe. Un même contenu à plusieurs endroits (Photos et
+   * un album, décision du 24/10/2026) ne compte qu'une fois : on somme les
+   * blobs distincts du compte. La corbeille ne compte que les blobs dont tous
+   * les exemplaires y sont, ce que la vider libérerait.
+   */
   async function usageOf(conn, alanyaID) {
     const [[u]] = await conn.query(
-      `SELECT COALESCE(SUM(b.stored_bytes + b.preview_bytes), 0) AS used,
-              COALESCE(SUM(IF(b.status = 'pending', b.stored_bytes + b.preview_bytes, 0)), 0) AS pending,
-              COALESCE(SUM(IF(f.trashed_at IS NOT NULL, b.stored_bytes + b.preview_bytes, 0)), 0) AS trash
-         FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
-        WHERE f.alanyaID = ?`,
+      `SELECT COALESCE(SUM(t), 0) AS used,
+              COALESCE(SUM(IF(en_cours, t, 0)), 0) AS pending,
+              COALESCE(SUM(IF(tout_jete, t, 0)), 0) AS trash
+         FROM (SELECT b.stored_bytes + b.preview_bytes AS t,
+                      b.status = 'pending' AS en_cours,
+                      MIN(f.trashed_at IS NOT NULL) AS tout_jete
+                 FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+                WHERE f.alanyaID = ?
+                GROUP BY b.id) x`,
       [alanyaID],
     );
     let notes = { used: 0, pending: 0, trash: 0 };
@@ -147,16 +185,26 @@ function createSafeboxService({
     const settings = await getSettings();
     const racines = await ensureAccount(alanyaID);
     const usage = await usageOf(db, alanyaID);
-    const [parFamille] = await db.query(
-      `SELECT f.family, COALESCE(SUM(b.stored_bytes + b.preview_bytes), 0) AS octets, COUNT(*) AS fichiers
-         FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
-        WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
-        GROUP BY f.family`,
-      [alanyaID],
+    // Par racine, chaque contenu une fois : dans la première racine où il se
+    // trouve, dans l'ordre d'affichage (une photo de Photos ajoutée à un album
+    // compte dans Photos).
+    const [parRang] = await db.query(
+      `SELECT rang, COALESCE(SUM(t), 0) AS octets, COUNT(*) AS fichiers
+         FROM (SELECT b.stored_bytes + b.preview_bytes AS t, MIN(FIELD(fo.root, ?)) AS rang
+                 FROM safebox_file f
+                 JOIN safebox_blob b ON b.id = f.blob_id
+                 JOIN safebox_folder fo ON fo.id = f.folder_id
+                WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+                GROUP BY b.id) x
+        GROUP BY rang`,
+      [C.ROOTS, alanyaID],
     );
     const familles = {};
     for (const root of C.ROOTS) familles[root] = { bytes: 0, files: 0 };
-    for (const r of parFamille) familles[r.family] = { bytes: Number(r.octets), files: Number(r.fichiers) };
+    for (const r of parRang) {
+      const root = C.ROOTS[Number(r.rang) - 1];
+      if (root) familles[root] = { bytes: Number(r.octets), files: Number(r.fichiers) };
+    }
     const sonEspace = await espace(alanyaID, settings);
     return {
       quota: {
@@ -315,17 +363,47 @@ function createSafeboxService({
     return { text: n.text || null, audio, updatedAt: n.updated_at };
   }
 
-  /** Ajoute aux lignes leur `meta` et, sur demande, leur `sent` (badge) et leur `note`. */
-  async function enrichir(rows, { envois = false, notes = null } = {}) {
+  /**
+   * Où se trouve chaque contenu dans le coffre du compte, hors corbeille :
+   * un même blob peut être dans Photos et dans des albums (décision du
+   * 24/10/2026). La feuille de suppression le dit et propose « partout ».
+   */
+  async function endroitsDe(alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    const out = new Map();
+    if (!ids.length) return out;
+    const [rows] = await db.query(
+      `SELECT f.id, f.blob_id, f.folder_id, fo.root, fo.name
+         FROM safebox_file f JOIN safebox_folder fo ON fo.id = f.folder_id
+        WHERE f.alanyaID = ? AND f.blob_id IN (?) AND f.trashed_at IS NULL
+        ORDER BY f.id`,
+      [alanyaID, ids],
+    );
+    for (const r of rows) {
+      const cle = Number(r.blob_id);
+      if (!out.has(cle)) out.set(cle, []);
+      // Nom nul pour un dossier racine : l'application affiche son nom traduit.
+      out.get(cle).push({ fileId: Number(r.id), folderId: Number(r.folder_id), root: r.root, folderName: r.name });
+    }
+    return out;
+  }
+
+  /**
+   * Ajoute aux lignes leur `meta` et, sur demande, leur `sent` (badge), leur
+   * `note` et leurs autres endroits (`places` : le compte propriétaire).
+   */
+  async function enrichir(rows, { envois = false, notes = null, places = null } = {}) {
     const details = await detailsDe(rows.map((f) => f.blob_id));
     const partages = envois ? await envoisDe(rows.map((f) => f.id)) : new Map();
-    const commentaires = notes ? await notesDe(notes, rows.filter((f) => f.family === 'albums').map((f) => f.id)) : null;
+    const commentaires = notes ? await notesDe(notes, rows.filter((f) => f.family === 'photos').map((f) => f.id)) : null;
+    const endroits = places ? await endroitsDe(places, rows.map((f) => f.blob_id)) : null;
     for (const f of rows) {
       if (commentaires) f.note = commentaires.get(Number(f.id)) ?? null;
       const d = details.get(Number(f.blob_id));
       f.meta = d?.meta ?? null;
       f.lost = Boolean(d?.lostAt);
       if (envois) f.sent = partages.get(Number(f.id)) ?? null;
+      if (endroits) f.alsoIn = (endroits.get(Number(f.blob_id)) ?? []).filter((p) => p.fileId !== Number(f.id));
     }
     return rows;
   }
@@ -362,6 +440,7 @@ function createSafeboxService({
       updatedAt: f.updated_at,
     };
     if (f.sent !== undefined) out.sent = f.sent;
+    if (f.alsoIn !== undefined) out.alsoIn = f.alsoIn;
     // Commentaire privé : seulement quand l'appelant l'a demandé pour le propriétaire.
     if (f.note !== undefined) out.note = f.note;
     if (f.wrapped_key) out.key = unwrapFileKey(f.wrapped_key, f.blob_id, env).toString('base64');
@@ -407,7 +486,8 @@ function createSafeboxService({
       folder: folderShape(dossier),
       breadcrumbs: ascendance.map(folderShape),
       folders: sousDossiers,
-      files: await Promise.all((await enrichir(fichiers, { envois: true, notes: storage })).map((f) => fileShape(f, storage))),
+      files: await Promise.all((await enrichir(fichiers, { envois: true, notes: storage, places: alanyaID }))
+        .map((f) => fileShape(f, storage))),
       nextCursor: fichiers.length === C.PAGE_SIZE ? Number(fichiers[fichiers.length - 1].id) : null,
     };
   }
@@ -611,9 +691,14 @@ function createSafeboxService({
     return f;
   }
 
-  /** `PATCH /api/safebox/files/:id` — renommer et/ou déplacer. */
+  /**
+   * `PATCH /api/safebox/files/:id` — renommer (même famille) et/ou déplacer
+   * vers un dossier qui accepte sa famille : le dossier de sa famille, Albums
+   * ou Partager.
+   */
   async function updateFile(alanyaID, fileId, body = {}) {
     const storage = ready();
+    await assertSixDossiers(); // un déplacement dépend des six racines
     const settings = await getSettings();
     const f = await liveFile(db, alanyaID, fileId);
     const champs = [];
@@ -626,8 +711,8 @@ function createSafeboxService({
     }
     if (body.folderId !== undefined) {
       const cible = await liveFolder(db, alanyaID, body.folderId);
-      if (cible.root !== f.family) {
-        throw new SafeboxError('SAFEBOX_WRONG_FAMILY', 400, 'Un fichier reste dans sa famille', { expectedRoot: f.family });
+      if (!R.acceptsFamily(cible.root, f.family)) {
+        throw new SafeboxError('SAFEBOX_WRONG_FAMILY', 400, "Ce dossier n'accepte pas ce type de fichier", { expectedRoot: f.family });
       }
       champs.push('folder_id = ?');
       valeurs.push(cible.id);
@@ -638,25 +723,39 @@ function createSafeboxService({
     return fileShape(await liveFile(db, alanyaID, f.id), storage);
   }
 
-  /** `DELETE /api/safebox/files/:id` — à la corbeille. */
-  async function trashFile(alanyaID, fileId) {
+  /**
+   * `DELETE /api/safebox/files/:id` — à la corbeille. Seulement cet exemplaire
+   * (« Retirer de l'album seulement ») ; avec `everywhere`, tous les
+   * exemplaires du même contenu dans le coffre (« Supprimer partout »), seul
+   * moyen de libérer sa place. Rend le nombre d'exemplaires jetés.
+   */
+  async function trashFile(alanyaID, fileId, { everywhere = false } = {}) {
     ready();
     const f = await liveFile(db, alanyaID, fileId);
-    await db.query(
-      'UPDATE safebox_file SET trashed_at = NOW(), trashed_by_folder = NULL WHERE id = ? AND alanyaID = ? AND trashed_at IS NULL',
-      [f.id, alanyaID],
-    );
-    return { ok: true };
+    const [r] = everywhere
+      ? await db.query(
+        `UPDATE safebox_file SET trashed_at = NOW(), trashed_by_folder = NULL
+          WHERE alanyaID = ? AND blob_id = ? AND trashed_at IS NULL`,
+        [alanyaID, f.blob_id],
+      )
+      : await db.query(
+        'UPDATE safebox_file SET trashed_at = NOW(), trashed_by_folder = NULL WHERE id = ? AND alanyaID = ? AND trashed_at IS NULL',
+        [f.id, alanyaID],
+      );
+    return { ok: true, trashed: r.affectedRows };
   }
 
-  /** `POST /api/safebox/files/:id/restore` — dans son dossier, ou à la racine s'il est à la corbeille. */
+  /**
+   * `POST /api/safebox/files/:id/restore` — dans son dossier, ou à la racine
+   * de ce dossier si lui-même est à la corbeille.
+   */
   async function restoreFile(alanyaID, fileId) {
     const storage = ready();
     const racines = await ensureAccount(alanyaID);
     const id = R.parseId(fileId);
     if (!id) throw introuvable();
     const [[f]] = await db.query(
-      `SELECT f.id, f.family, fo.trashed_at AS dossier_corbeille
+      `SELECT f.id, fo.root, fo.trashed_at AS dossier_corbeille
          FROM safebox_file f JOIN safebox_folder fo ON fo.id = f.folder_id
         WHERE f.id = ? AND f.alanyaID = ? AND f.trashed_at IS NOT NULL AND f.trashed_by_folder IS NULL`,
       [id, alanyaID],
@@ -665,9 +764,60 @@ function createSafeboxService({
     const versRacine = f.dossier_corbeille ? ', folder_id = ?' : '';
     await db.query(
       `UPDATE safebox_file SET trashed_at = NULL${versRacine} WHERE id = ? AND alanyaID = ?`,
-      f.dossier_corbeille ? [racines[f.family].id, id, alanyaID] : [id, alanyaID],
+      f.dossier_corbeille ? [racines[f.root].id, id, alanyaID] : [id, alanyaID],
     );
     return fileShape(await liveFile(db, alanyaID, id), storage);
+  }
+
+  /**
+   * `POST /api/safebox/folders/:id/files` — ajoute des fichiers du coffre à
+   * un album, sans copie (décision du 24/10/2026) : l'album désigne les mêmes
+   * blocs, et l'espace ne les compte qu'une fois. Un fichier déjà dans cet
+   * album n'est pas ajouté deux fois. Rend les fichiers de l'album.
+   */
+  async function addToFolder(alanyaID, folderId, body = {}) {
+    const storage = ready();
+    await assertSixDossiers();
+    const ids = Array.isArray(body.fileIds) ? [...new Set(body.fileIds.map(R.parseId))] : [];
+    if (!ids.length || ids.length > C.PAGE_SIZE || ids.some((id) => !id)) {
+      throw new SafeboxError('SAFEBOX_INVALID_MOVE', 400, `De 1 à ${C.PAGE_SIZE} fichiers à la fois`, { max: C.PAGE_SIZE });
+    }
+    const ajoutes = await tx(async (conn) => {
+      const album = await liveFolder(conn, alanyaID, folderId);
+      if (album.root !== 'albums') {
+        throw new SafeboxError('SAFEBOX_INVALID_MOVE', 400, "On n'ajoute sans copie que dans Albums");
+      }
+      const [sources] = await conn.query(
+        `${FICHIER} WHERE f.id IN (?) AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'`,
+        [ids, alanyaID],
+      );
+      if (sources.length !== ids.length) throw introuvable();
+      // Verrou des blobs : une purge ne peut pas les emporter pendant qu'on
+      // les désigne (voir markIfOrphan dans purge.js).
+      await conn.query('SELECT id FROM safebox_blob WHERE id IN (?) FOR UPDATE', [sources.map((s) => s.blob_id)]);
+      const [deja] = await conn.query(
+        'SELECT id, blob_id FROM safebox_file WHERE folder_id = ? AND blob_id IN (?) AND trashed_at IS NULL',
+        [album.id, sources.map((s) => s.blob_id)],
+      );
+      const presents = new Map(deja.map((d) => [Number(d.blob_id), Number(d.id)]));
+      const out = [];
+      for (const s of sources) {
+        const blob = Number(s.blob_id);
+        if (!presents.has(blob)) {
+          const [r] = await conn.query(
+            `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [alanyaID, album.id, blob, s.name, s.ext, s.mime, s.family, s.original_bytes, s.compressed ? 1 : 0],
+          );
+          presents.set(blob, r.insertId);
+        }
+        out.push(presents.get(blob));
+      }
+      return out;
+    });
+    const [rows] = await db.query(`${FICHIER} WHERE f.id IN (?) AND f.alanyaID = ?`, [ajoutes, alanyaID]);
+    await enrichir(rows, { places: alanyaID });
+    return { files: await Promise.all(rows.map((f) => fileShape(f, storage))) };
   }
 
   /** `GET /api/safebox/files/:id/download` — clé et adresses de tous les blocs. */
@@ -712,23 +862,29 @@ function createSafeboxService({
               f.compressed, f.trashed_at, f.trashed_by_folder, f.created_at, f.updated_at,
               b.id AS blob_id, b.prefix, b.block_size, b.block_count, b.stored_bytes,
               b.plain_bytes, b.preview_bytes, b.cipher_format, b.wrapped_key, b.status,
-              fo.name AS folder_name
+              fo.name AS folder_name, fo.root AS folder_root
          FROM safebox_file f
          JOIN safebox_blob b ON b.id = f.blob_id
          JOIN safebox_folder fo ON fo.id = f.folder_id
         WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+          -- Un contenu à plusieurs endroits n'apparaît qu'une fois, sous son
+          -- premier exemplaire ; \`alsoIn\` dit où sont les autres.
+          AND f.id = (SELECT MIN(f2.id) FROM safebox_file f2
+                       WHERE f2.alanyaID = f.alanyaID AND f2.blob_id = f.blob_id AND f2.trashed_at IS NULL)
         ORDER BY (b.stored_bytes + b.preview_bytes) DESC, f.id DESC
         LIMIT ${n}`,
       [alanyaID],
     );
     const { trashBytes } = await usageOf(db, alanyaID);
-    await enrichir(rows, { envois: true });
+    await enrichir(rows, { envois: true, places: alanyaID });
     return {
       trashBytes,
       files: await Promise.all(rows.map(async (f) => ({
         ...(await fileShape(f, storage)),
-        // Nul pour un dossier racine : l'application affiche son nom traduit.
+        // Nul pour un dossier racine : l'application affiche le nom traduit
+        // de sa racine.
         folderName: f.folder_name,
+        folderRoot: f.folder_root,
       }))),
     };
   }
@@ -738,7 +894,7 @@ function createSafeboxService({
   /** Une photo vivante de mon coffre : seules les photos ont un commentaire. */
   async function photoAMoi(alanyaID, fileId) {
     const f = await liveFile(db, alanyaID, fileId);
-    if (f.family !== 'albums') {
+    if (f.family !== 'photos') {
       throw new SafeboxError('SAFEBOX_NOTE_UNAVAILABLE', 400, 'Les commentaires sont réservés aux photos');
     }
     return f;
@@ -907,7 +1063,7 @@ function createSafeboxService({
       // Verrou du compte : deux réservations simultanées ne dépassent pas l'espace.
       await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
       const dossier = await liveFolder(conn, alanyaID, body.folderId);
-      const { ext } = R.assertFamily(dossier.root, nom, settings.extensions);
+      const { ext, famille } = R.assertFamily(dossier.root, nom, settings.extensions);
       const { usedBytes } = await usageOf(conn, alanyaID);
       const ajout = tailles.size + tailles.previewSize;
       if (!R.fitsQuota({ usedBytes, quotaBytes, addBytes: ajout })) {
@@ -924,7 +1080,7 @@ function createSafeboxService({
       const [f] = await conn.query(
         `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [alanyaID, dossier.id, b.insertId, nom, ext, mime, dossier.root, tailles.originalSize, body.compressed ? 1 : 0],
+        [alanyaID, dossier.id, b.insertId, nom, ext, mime, famille, tailles.originalSize, body.compressed ? 1 : 0],
       );
       return {
         fileId: f.insertId,
@@ -1330,8 +1486,8 @@ function createSafeboxService({
       );
       if (deja) return Number(deja.id);
       const dossier = await liveFolder(conn, alanyaID, body.folderId ?? racines[fichier.family].id);
-      if (dossier.root !== fichier.family) {
-        throw new SafeboxError('SAFEBOX_WRONG_FAMILY', 400, 'Un fichier reste dans sa famille', { expectedRoot: fichier.family });
+      if (!R.acceptsFamily(dossier.root, fichier.family)) {
+        throw new SafeboxError('SAFEBOX_WRONG_FAMILY', 400, "Ce dossier n'accepte pas ce type de fichier", { expectedRoot: fichier.family });
       }
       // Verrou du blob, puis son état : une purge ne peut pas l'emporter
       // pendant qu'on le désigne (voir markIfOrphan dans purge.js).
@@ -1383,8 +1539,10 @@ function createSafeboxService({
         if (!rows.length) return;
         await conn.query('DELETE FROM safebox_file WHERE id IN (?)', [rows.map((r) => r.id)]);
         for (const r of rows) {
-          blobIds.add(Number(r.blob_id));
           fichiers += 1;
+          // Un contenu à plusieurs endroits ne compte qu'une fois.
+          if (blobIds.has(Number(r.blob_id))) continue;
+          blobIds.add(Number(r.blob_id));
           octets += Number(r.t);
         }
       };
@@ -1400,22 +1558,31 @@ function createSafeboxService({
         [alanyaID],
       );
       ({ usedBytes } = await usageOf(conn, alanyaID));
+      // Par contenu, le plus récent d'abord : un contenu à plusieurs endroits
+      // ne libère sa place que lorsque tous ses exemplaires partent.
       while (usedBytes > sonEspace.quotaBytes) {
         const [lot] = await conn.query(
-          `SELECT f.id, f.blob_id, b.stored_bytes + b.preview_bytes AS t
+          `SELECT f.blob_id, b.stored_bytes + b.preview_bytes AS t, MAX(f.created_at) AS recent, MAX(f.id) AS dernier
              FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
             WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
-            ORDER BY f.created_at DESC, f.id DESC LIMIT 200`,
+            GROUP BY f.blob_id
+            ORDER BY recent DESC, dernier DESC LIMIT 200`,
           [alanyaID],
         );
         if (!lot.length) break;
         const partants = [];
         for (const r of lot) {
           if (usedBytes <= sonEspace.quotaBytes) break;
-          partants.push(r);
+          partants.push(Number(r.blob_id));
           usedBytes -= Number(r.t);
         }
-        await supprimer(partants);
+        const [exemplaires] = await conn.query(
+          `SELECT f.id, f.blob_id, b.stored_bytes + b.preview_bytes AS t
+             FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+            WHERE f.alanyaID = ? AND f.blob_id IN (?) AND f.trashed_at IS NULL`,
+          [alanyaID, partants],
+        );
+        await supprimer(exemplaires);
       }
     });
     if (blobIds.size) {
@@ -1553,6 +1720,7 @@ function createSafeboxService({
     updateFile,
     trashFile,
     restoreFile,
+    addToFolder,
     downloadFile,
     largestFiles,
     createShare,
