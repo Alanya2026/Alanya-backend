@@ -63,10 +63,16 @@ jobs:
           key: ${{ secrets.ALANYA_SSH_KEY }}
           port: ${{ secrets.ALANYA_PORT }}
           script: |
+            set -e
             # Charge nvm s'il est utilisé (sinon node global via apt)
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd ~/Alanya-backend
+            # Le serveur suit le dépôt qui lance ce pipeline, pas le remote
+            # enregistré au clonage : après le passage sous Alanya2026, le
+            # clone pointait encore vers l'ancien dépôt et aurait redéployé
+            # son main en silence.
+            git remote set-url origin https://github.com/${{ github.repository }}.git
             git fetch origin main
             git reset --hard origin/main
             npm install --omit=dev
