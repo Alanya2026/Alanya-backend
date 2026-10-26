@@ -100,8 +100,21 @@ function accountTag(alanyaID, env = process.env) {
     .slice(0, 20);
 }
 
+/**
+ * Empreinte de l'original d'un fichier, liée au compte (lot 10) : le
+ * téléphone envoie l'empreinte de son fichier, le serveur garde celle-ci.
+ * Deux comptes qui sauvegardent la même photo n'ont pas la même, et elle ne
+ * permet pas de reconnaître un fichier connu.
+ */
+function sourceFingerprint(alanyaID, fp, env = process.env) {
+  return crypto.createHmac('sha256', requireMaster(env))
+    .update(`safebox-source:${alanyaID}:${fp}`)
+    .digest('hex');
+}
+
 module.exports = {
   SafeboxKeyUnavailable,
+  sourceFingerprint,
   keyConfigured,
   wrapFileKey,
   unwrapFileKey,

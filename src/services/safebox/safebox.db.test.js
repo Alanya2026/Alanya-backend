@@ -20,7 +20,7 @@
  *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
  *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
  *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
- *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers 109_safebox_partage_lots; do
+ *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers 109_safebox_partage_lots 110_safebox_sauvegarde_auto; do
  *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
@@ -853,6 +853,76 @@ test('lot 9 : retirer le partage, fichier supprimé dans un lot, modération d\'
   assert.strictEqual(sup.megaDeleted, true);
   await refuse(svc.downloadFile(Ex, plage.id), 'SAFEBOX_NOT_FOUND');
   assert.strictEqual((await svc.usageOf(lot9.Mx)).usedBytes, 0, 'les copies gardées partent aussi');
+});
+
+// ── Lot 10 : sauvegarde automatique (migration 110) ───────────────────────
+
+test('sauvegarde automatique : doublons, ajout sans copie à Photos, « ne plus sauvegarder »', async () => {
+  const P = await compte('sauvegarde');
+  const Q = await compte('autre-telephone');
+  const racines = Object.fromEntries((await svc.overview(P)).roots.map((r) => [r.root, r.id]));
+  const fp = (n) => crypto.createHash('sha256').update(`original-${n}`).digest('hex');
+  const deposerAvec = async (qui, folderId, name, empreinte) => {
+    const r = await svc.reserveUpload(qui, {
+      folderId, name, size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: empreinte,
+    });
+    deposer(r);
+    return svc.completeUpload(qui, r.fileId, { key: cle.toString('base64') });
+  };
+  await refuse(svc.reserveUpload(P, { folderId: racines.photos, name: 'x.jpg', size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: 'zz' }), 'SAFEBOX_INVALID_FINGERPRINT');
+
+  // Sauvegardée dans Photos, ajoutée à la main dans un album, envoi en cours.
+  const sauvee = await deposerAvec(P, racines.photos, 'Sauvee.jpg', fp(1));
+  const album = await svc.createFolder(P, { parentId: racines.albums, name: 'Kribi' });
+  const dansAlbum = await deposerAvec(P, album.id, 'Album.jpg', fp(2));
+  await svc.reserveUpload(P, { folderId: racines.videos, name: 'EnCours.mp4', size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: fp(3) });
+
+  const etats = (r) => Object.fromEntries(Object.entries(r.results).map(([k, v]) => [k, v.state]));
+  const avant = await svc.backupCheck(P, { fps: [fp(1), fp(2), fp(3), fp(4)] });
+  assert.deepStrictEqual(etats(avant), { [fp(1)]: 'saved', [fp(2)]: 'elsewhere', [fp(3)]: 'uploading', [fp(4)]: 'new' });
+  assert.strictEqual(avant.results[fp(1)].fileId, sauvee.id);
+
+  // L'empreinte est liée au compte : le même original n'est pas « déjà là » chez un autre.
+  assert.deepStrictEqual(etats(await svc.backupCheck(Q, { fps: [fp(1)] })), { [fp(1)]: 'new' });
+
+  // « link » : la photo de l'album rejoint Photos, sans copie ni espace en plus.
+  const espace = (await svc.usageOf(P)).usedBytes;
+  const lie = await svc.backupCheck(P, { fps: [fp(2)], link: true });
+  assert.strictEqual(lie.results[fp(2)].state, 'saved');
+  assert.strictEqual(lie.results[fp(2)].linked, true);
+  const photos = await svc.listFolder(P, racines.photos);
+  assert.ok(photos.files.some((f) => f.name === 'Album.jpg'), 'dans Photos aussi');
+  assert.strictEqual((await svc.usageOf(P)).usedBytes, espace);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'saved');
+
+  // Supprimée d'un seul endroit : encore là. Supprimée partout : ne plus sauvegarder.
+  const lienPhotos = photos.files.find((f) => f.name === 'Album.jpg');
+  await svc.trashFile(P, dansAlbum.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'saved');
+  await svc.trashFile(P, lienPhotos.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'skip');
+  await svc.emptyTrash(P);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'skip', 'même après la corbeille vidée');
+
+  // Restaurée : elle se sauvegarde de nouveau.
+  await svc.trashFile(P, sauvee.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(1)] })).results[fp(1)].state, 'skip');
+  await svc.restoreFile(P, sauvee.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(1)] })).results[fp(1)].state, 'saved');
+
+  // Un dossier mis à la corbeille avec ses photos sauvegardées : pareil, et son retour aussi.
+  const sous = await svc.createFolder(P, { parentId: racines.photos, name: 'Vacances' });
+  await deposerAvec(P, sous.id, 'Plage.jpg', fp(5));
+  await svc.trashFolder(P, sous.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(5)] })).results[fp(5)].state, 'skip');
+  await svc.restoreFolder(P, sous.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(5)] })).results[fp(5)].state, 'saved');
+
+  // « Ne plus sauvegarder » demandé par le téléphone.
+  await svc.backupSkip(P, { fps: [fp(4), fp(4)] });
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(4)] })).results[fp(4)].state, 'skip');
+  await refuse(svc.backupCheck(P, { fps: [] }), 'SAFEBOX_INVALID_FINGERPRINT');
+  await refuse(svc.backupSkip(P, { fps: ['x'] }), 'SAFEBOX_INVALID_FINGERPRINT');
 });
 
 // ── Lot 4 : espace Alanya Plus ─────────────────────────────────────────────

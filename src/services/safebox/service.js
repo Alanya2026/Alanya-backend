@@ -20,7 +20,7 @@ const pool = require('../../config/db');
 const C = require('../../constants/safebox');
 const R = require('./rules');
 const { SafeboxError } = require('./errors');
-const { keyConfigured, wrapFileKey, unwrapFileKey, accountTag } = require('./keys');
+const { keyConfigured, wrapFileKey, unwrapFileKey, accountTag, sourceFingerprint } = require('./keys');
 const { defaultStorage } = require('./storage');
 const { getSafeboxSettings } = require('./settings');
 const { collectOrphans } = require('./purge');
@@ -633,6 +633,11 @@ function createSafeboxService({
           WHERE f.alanyaID = ? AND fo.path LIKE CONCAT(?, '%') AND f.trashed_at IS NULL`,
         [d.id, alanyaID, d.path],
       );
+      const [jetes] = await conn.query(
+        'SELECT DISTINCT blob_id FROM safebox_file WHERE trashed_by_folder = ? AND alanyaID = ?',
+        [d.id, alanyaID],
+      );
+      await retenirSuppression(conn, alanyaID, jetes.map((x) => x.blob_id));
       await conn.query(
         'UPDATE safebox_folder SET trashed_at = NOW(), trashed_by_folder = NULL WHERE id = ?',
         [d.id],
@@ -681,10 +686,15 @@ function createSafeboxService({
         'UPDATE safebox_folder SET trashed_at = NULL, trashed_by_folder = NULL WHERE trashed_by_folder = ? AND alanyaID = ?',
         [d.id, alanyaID],
       );
+      const [revenus] = await conn.query(
+        'SELECT DISTINCT blob_id FROM safebox_file WHERE trashed_by_folder = ? AND alanyaID = ?',
+        [d.id, alanyaID],
+      );
       await conn.query(
         'UPDATE safebox_file SET trashed_at = NULL, trashed_by_folder = NULL WHERE trashed_by_folder = ? AND alanyaID = ?',
         [d.id, alanyaID],
       );
+      await oublierSuppression(conn, alanyaID, revenus.map((x) => x.blob_id));
       await conn.query('UPDATE safebox_folder SET trashed_at = NULL WHERE id = ?', [d.id]);
     });
     const [[f]] = await db.query(
@@ -759,6 +769,7 @@ function createSafeboxService({
         'UPDATE safebox_file SET trashed_at = NOW(), trashed_by_folder = NULL WHERE id = ? AND alanyaID = ? AND trashed_at IS NULL',
         [f.id, alanyaID],
       );
+    await retenirSuppression(db, alanyaID, [f.blob_id]);
     return { ok: true, trashed: r.affectedRows };
   }
 
@@ -772,7 +783,7 @@ function createSafeboxService({
     const id = R.parseId(fileId);
     if (!id) throw introuvable();
     const [[f]] = await db.query(
-      `SELECT f.id, fo.root, fo.trashed_at AS dossier_corbeille
+      `SELECT f.id, f.blob_id, fo.root, fo.trashed_at AS dossier_corbeille
          FROM safebox_file f JOIN safebox_folder fo ON fo.id = f.folder_id
         WHERE f.id = ? AND f.alanyaID = ? AND f.trashed_at IS NOT NULL AND f.trashed_by_folder IS NULL`,
       [id, alanyaID],
@@ -783,6 +794,7 @@ function createSafeboxService({
       `UPDATE safebox_file SET trashed_at = NULL${versRacine} WHERE id = ? AND alanyaID = ?`,
       f.dossier_corbeille ? [racines[f.root].id, id, alanyaID] : [id, alanyaID],
     );
+    await oublierSuppression(db, alanyaID, [f.blob_id]);
     return fileShape(await liveFile(db, alanyaID, id), storage);
   }
 
@@ -1071,6 +1083,7 @@ function createSafeboxService({
     const tailles = R.validateSizes(body, { maxFileBytes: await maxFileFor(alanyaID, settings) });
     const format = R.validateCipherFormat(body.cipherFormat);
     const mime = typeof body.mime === 'string' && body.mime.length <= 127 ? body.mime : null;
+    const empreinte = R.normalizeSourceFp(body.sourceFp);
     const count = R.blockCount(tailles.size, C.BLOCK_BYTES);
     const prefix = `u/${accountTag(alanyaID, env)}/${crypto.randomUUID()}/`;
     const quotaBytes = await quotaFor(alanyaID, settings);
@@ -1114,6 +1127,14 @@ function createSafeboxService({
         await db.query('UPDATE safebox_blob SET meta = ? WHERE id = ?', [JSON.stringify(meta), blobId]);
       } catch (e) {
         if (e.code !== 'ER_BAD_FIELD_ERROR') throw e; // migration 104 absente : sans détails
+      }
+    }
+    if (empreinte) {
+      try {
+        await db.query('UPDATE safebox_blob SET source_fp = ? WHERE id = ?',
+          [sourceFingerprint(alanyaID, empreinte, env), blobId]);
+      } catch (e) {
+        if (!sansMigration110(e)) throw e;
       }
     }
 
@@ -1327,6 +1348,141 @@ function createSafeboxService({
     const id = R.parseId(folderId);
     if (!id) throw introuvable();
     return supprimerDefinitivement(ready(), alanyaID, { dossierId: id });
+  }
+
+  // ── Sauvegarde automatique (lot 10) ──────────────────────────────────────
+  //
+  // Le téléphone calcule l'empreinte de l'original de chaque fichier ; le
+  // serveur la lie au compte (`sourceFingerprint`) et la garde sur le blob.
+  // Avant d'envoyer, le téléphone demande ce que le coffre a déjà : rien n'est
+  // renvoyé deux fois, et ce que l'inscrit a supprimé du coffre n'y revient
+  // pas (« ne plus sauvegarder », migration 110).
+
+  const sansMigration110 = (e) => e.code === 'ER_NO_SUCH_TABLE' || e.code === 'ER_BAD_FIELD_ERROR';
+
+  /**
+   * Ces contenus viennent de passer à la corbeille : ceux qui ne sont plus
+   * nulle part dans mon coffre ne seront plus sauvegardés.
+   */
+  async function retenirSuppression(conn, alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    if (!ids.length) return;
+    try {
+      await conn.query(
+        `INSERT IGNORE INTO safebox_backup_skip (alanyaID, source_fp)
+         SELECT DISTINCT ?, b.source_fp FROM safebox_blob b
+          WHERE b.id IN (?) AND b.source_fp IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM safebox_file f
+                             WHERE f.blob_id = b.id AND f.alanyaID = ? AND f.trashed_at IS NULL)`,
+        [alanyaID, ids, alanyaID],
+      );
+    } catch (e) {
+      if (!sansMigration110(e)) throw e;
+    }
+  }
+
+  /** Revenus de la corbeille : ils se sauvegardent de nouveau. */
+  async function oublierSuppression(conn, alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    if (!ids.length) return;
+    try {
+      await conn.query(
+        `DELETE s FROM safebox_backup_skip s JOIN safebox_blob b ON b.source_fp = s.source_fp
+          WHERE s.alanyaID = ? AND b.id IN (?)`,
+        [alanyaID, ids],
+      );
+    } catch (e) {
+      if (!sansMigration110(e)) throw e;
+    }
+  }
+
+  /**
+   * `POST /api/safebox/backup/check` — pour chaque empreinte d'original
+   * (`fps`), ce que le coffre en a :
+   *   saved     dans le dossier de son type (Photos, Vidéos…), rien à faire ;
+   *   elsewhere seulement ailleurs (un album, Partager) — avec `link`, il est
+   *             ajouté sans copie au dossier de son type et devient `saved` ;
+   *   uploading un envoi est en cours (autre appareil, réinstallation) ;
+   *   skip      supprimé du coffre par l'inscrit : ne plus sauvegarder ;
+   *   new       à envoyer.
+   */
+  async function backupCheck(alanyaID, body = {}) {
+    ready();
+    await assertSixDossiers();
+    const fps = R.sourceFps(body.fps);
+    const racines = await ensureAccount(alanyaID);
+    const parEmpreinte = new Map(fps.map((fp) => [sourceFingerprint(alanyaID, fp, env), fp]));
+    const empreintes = [...parEmpreinte.keys()];
+    const results = Object.fromEntries(fps.map((fp) => [fp, { state: 'new' }]));
+    let fichiers;
+    try {
+      [fichiers] = await db.query(
+        `SELECT f.id, f.family, fo.root, b.id AS blob_id, b.status, b.source_fp
+           FROM safebox_file f
+           JOIN safebox_blob b ON b.id = f.blob_id
+           JOIN safebox_folder fo ON fo.id = f.folder_id
+          WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.source_fp IN (?)
+          ORDER BY f.id`,
+        [alanyaID, empreintes],
+      );
+    } catch (e) {
+      if (sansMigration110(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
+      throw e;
+    }
+    const [sautes] = await db.query(
+      'SELECT source_fp FROM safebox_backup_skip WHERE alanyaID = ? AND source_fp IN (?)',
+      [alanyaID, empreintes],
+    );
+    for (const x of sautes) results[parEmpreinte.get(x.source_fp)] = { state: 'skip' };
+    const ailleurs = new Map();
+    for (const f of fichiers) {
+      const fp = parEmpreinte.get(f.source_fp);
+      const r = results[fp];
+      if (f.status !== 'ready') {
+        if (r.state === 'new') results[fp] = { state: 'uploading' };
+      } else if (f.root === f.family) {
+        results[fp] = { state: 'saved', fileId: Number(f.id) };
+      } else if (r.state !== 'saved') {
+        results[fp] = { state: 'elsewhere', fileId: Number(f.id) };
+        ailleurs.set(fp, f);
+      }
+    }
+    if (body.link === true) {
+      for (const [fp, f] of ailleurs) {
+        if (results[fp].state !== 'elsewhere') continue;
+        const fileId = await tx(async (conn) => {
+          // Verrou du blob : voir addToFolder.
+          const [[b]] = await conn.query('SELECT status FROM safebox_blob WHERE id = ? FOR UPDATE', [f.blob_id]);
+          if (!b || b.status !== 'ready') return null;
+          const [[src]] = await conn.query(`${FICHIER} WHERE f.id = ?`, [f.id]);
+          const [r] = await conn.query(
+            `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [alanyaID, racines[src.family].id, f.blob_id, src.name, src.ext, src.mime, src.family,
+              src.original_bytes, Number(src.compressed)],
+          );
+          return r.insertId;
+        });
+        if (fileId) results[fp] = { state: 'saved', fileId: Number(fileId), linked: true };
+      }
+    }
+    return { results };
+  }
+
+  /** `POST /api/safebox/backup/skip` — « ne plus sauvegarder » ces originaux (`fps`). */
+  async function backupSkip(alanyaID, body = {}) {
+    ready();
+    const fps = R.sourceFps(body.fps);
+    try {
+      await db.query(
+        'INSERT IGNORE INTO safebox_backup_skip (alanyaID, source_fp) VALUES ?',
+        [fps.map((fp) => [alanyaID, sourceFingerprint(alanyaID, fp, env)])],
+      );
+    } catch (e) {
+      if (sansMigration110(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
+      throw e;
+    }
+    return { ok: true, skipped: fps.length };
   }
 
   // ── Partage entre inscrits (lots 3 et 9) ─────────────────────────────────
@@ -2220,6 +2376,8 @@ function createSafeboxService({
     receivedShares,
     shareRecipients,
     revokeShare,
+    backupCheck,
+    backupSkip,
     purgeExcess,
     moderationView,
     moderationRevoke,
