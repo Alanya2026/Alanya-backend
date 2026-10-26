@@ -15,11 +15,12 @@
  *     CREATE USER 'root'@'127.0.0.1' IDENTIFIED BY 'jetable';
  *     GRANT ALL ON *.* TO 'root'@'127.0.0.1';
  *     CREATE DATABASE talky_test; USE talky_test;
- *     CREATE TABLE users (alanyaID INT AUTO_INCREMENT PRIMARY KEY, nom VARCHAR(50));
+ *     CREATE TABLE users (alanyaID INT AUTO_INCREMENT PRIMARY KEY, nom VARCHAR(50),
+ *       pseudo VARCHAR(80) NOT NULL DEFAULT 'alanyaUser', avatar_url VARCHAR(255) NOT NULL DEFAULT 'NON DEFINI');
  *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
  *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
  *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
- *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers; do
+ *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers 109_safebox_partage_lots; do
  *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
@@ -596,6 +597,8 @@ test('détails de la carte et badge de l\'expéditeur (migration 104, ou son abs
   const attendu = avec104 ? { durationMs: 767000, width: 1920, height: 1080 } : null;
   assert.deepStrictEqual(f.meta, attendu);
   const liste = () => svc.listFolder(E, racinesE.videos).then((p) => p.files.find((x) => x.id === f.id));
+  // Lot 9 : la discussion du dernier partage (« Famille Ngono · téléchargé par 5 sur 8 »).
+  const envoi = (recipients, received) => ({ shares: 1, recipients, received: recu(received), lastConversationId: conv2 });
   assert.strictEqual((await liste()).sent, null, 'jamais partagé');
 
   const p3 = await svc.createShare(E, { fileId: f.id, conversationId: conv2 });
@@ -606,24 +609,24 @@ test('détails de la carte et badge de l\'expéditeur (migration 104, ou son abs
   );
   assert.deepStrictEqual(JSON.parse(msg.content).meta ?? null, attendu, 'la carte du destinataire les reçoit');
   assert.deepStrictEqual((await svc.shareInfo(D, p3.shareId)).meta, attendu);
-  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 2, received: recu(0) });
+  assert.deepStrictEqual((await liste()).sent, envoi(2, 0));
 
   await svc.shareDownload(D, p3.shareId);
   await svc.shareDownload(D, p3.shareId);
   await svc.shareDownload(E, p3.shareId); // l'expéditeur ne compte pas
-  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 2, received: recu(1) });
+  assert.deepStrictEqual((await liste()).sent, envoi(2, 1));
   const copie = await svc.saveShare(M, p3.shareId);
   assert.deepStrictEqual(copie.meta, attendu, 'même blob, mêmes détails');
-  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 2, received: recu(2) });
+  assert.deepStrictEqual((await liste()).sent, envoi(2, 2));
   // Survit à la purge du journal des téléchargements (31 jours).
   await pool.query('DELETE FROM safebox_share_download WHERE share_id = ?', [p3.shareId]);
   assert.strictEqual((await liste()).sent.received, recu(2));
   const gros = (await svc.largestFiles(E)).files.find((x) => x.id === f.id);
-  assert.deepStrictEqual(gros.sent, { shares: 1, recipients: 2, received: recu(2) });
+  assert.deepStrictEqual(gros.sent, envoi(2, 2));
 
   // Un destinataire qui quitte la discussion ne compte plus, ni comme destinataire ni comme reçu.
   await pool.query('DELETE FROM conv_participants WHERE conversID = ? AND alanyaID = ?', [conv2, M]);
-  assert.deepStrictEqual((await liste()).sent, { shares: 1, recipients: 1, received: recu(1) });
+  assert.deepStrictEqual((await liste()).sent, envoi(1, 1));
 
   const sans = await svc.reserveUpload(E, {
     folderId: racinesE.documents, name: 'Note.pdf', size: 5, plainSize: 5, cipherFormat: 'E2C1',
@@ -631,6 +634,225 @@ test('détails de la carte et badge de l\'expéditeur (migration 104, ou son abs
   });
   deposer(sans);
   assert.strictEqual((await svc.completeUpload(E, sans.fileId, { key: cle.toString('base64') })).meta, null);
+});
+
+// ── Lot 9 : un lot en une carte, Reçus, suivi, retrait (migration 109) ─────
+
+let lot9;
+test('lot 9 : un album en un seul partage, sa carte, ses éléments', async () => {
+  const Ex = await compte('Clarisse');
+  const Dx = await compte('Paul');
+  const Mx = await compte('Lina');
+  const Hx = await compte('hors-discussion');
+  const [c] = await pool.query('INSERT INTO conversation () VALUES ()');
+  const conv = c.insertId;
+  await pool.query('INSERT INTO conv_participants (conversID, alanyaID) VALUES (?, ?), (?, ?), (?, ?)',
+    [conv, Ex, conv, Dx, conv, Mx]);
+  const racines = Object.fromEntries((await svc.overview(Ex)).roots.map((r) => [r.root, r.id]));
+  const album = await svc.createFolder(Ex, { parentId: racines.albums, name: 'Kribi 2026' });
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(100)]);
+  const deposerDans = async (folderId, name, size) => {
+    const apercu = encryptPreview(cle, jpeg);
+    const r = await svc.reserveUpload(Ex, {
+      folderId, name, size, plainSize: size, previewSize: apercu.length, cipherFormat: 'SBX1',
+    });
+    stockage.contenus.set(`${deposer(r)}apercu`, apercu);
+    return svc.completeUpload(Ex, r.fileId, { key: cle.toString('base64') });
+  };
+  const plage = await deposerDans(album.id, 'Plage.jpg', 100);
+  const danse = await deposerDans(album.id, 'Danse.mp4', 300);
+  const hotel = await deposerDans(album.id, 'Hotel.pdf', 50);
+  const coucher = await deposerDans(album.id, 'Coucher.jpg', 120);
+  const seule = await deposerDans(racines.photos, 'Seule.jpg', 70);
+
+  // Un album fait un lot ; un seul fichier reste un partage simple.
+  await refuse(svc.createShare(Hx, { folderId: album.id, conversationId: conv }), 'SAFEBOX_NOT_FOUND');
+  await refuse(svc.createShare(Ex, { fileIds: [plage.id, 999999], conversationId: conv }), 'SAFEBOX_NOT_FOUND');
+  await refuse(svc.createShare(Ex, { fileIds: [], conversationId: conv }), 'SAFEBOX_SHARE_INVALID');
+  const vide = await svc.createFolder(Ex, { parentId: racines.albums, name: 'Vide' });
+  await refuse(svc.createShare(Ex, { folderId: vide.id, conversationId: conv }), 'SAFEBOX_SHARE_INVALID');
+  const simple = await svc.createShare(Ex, { fileIds: [seule.id], conversationId: conv });
+  assert.strictEqual(simple.kind, 'file');
+  const p = await svc.createShare(Ex, { folderId: album.id, conversationId: conv });
+  assert.strictEqual(p.kind, 'batch');
+  assert.strictEqual(p.name, 'Kribi 2026');
+  assert.strictEqual(p.count, 4);
+  assert.strictEqual(p.plainBytes, 570);
+  assert.deepStrictEqual(p.families, { photos: 2, videos: 1, documents: 1 });
+  assert.strictEqual(p.family, 'photos');
+  assert.deepStrictEqual(p.cover, [coucher.id, hotel.id, danse.id, plage.id], 'les plus récents d\'abord');
+  const selection = await svc.createShare(Ex, { fileIds: [danse.id, plage.id], title: 'Pour Paul', conversationId: conv });
+  assert.strictEqual(selection.name, 'Pour Paul');
+
+  // Le message porte le lot ; les anciennes applications lisent titre et taille.
+  const msg = await resolveSafeboxShareFields(
+    { type: 11, content: JSON.stringify({ v: 1, share: p.shareId, bs: ['QUJD', '', 'REVG'] }), senderID: Ex, conversationID: conv },
+    { db: pool },
+  );
+  const contenu = JSON.parse(msg.content);
+  assert.deepStrictEqual(
+    { kind: contenu.kind, count: contenu.count, families: contenu.families, name: contenu.name, size: contenu.size, bs: contenu.bs },
+    { kind: 'batch', count: 4, families: { photos: 2, videos: 1, documents: 1 }, name: 'Kribi 2026', size: 570, bs: ['QUJD', '', 'REVG'] },
+  );
+
+  // La carte : mosaïque des quatre premiers, clé, expéditeur ; le suivi pour l'expéditeur seul.
+  await refuse(svc.shareInfo(Hx, p.shareId), 'SAFEBOX_NOT_FOUND');
+  const carte = await svc.shareInfo(Dx, p.shareId);
+  assert.strictEqual(carte.kind, 'batch');
+  assert.strictEqual(carte.available, true);
+  assert.strictEqual(carte.availableCount, 4);
+  assert.deepStrictEqual(carte.cover.map((e) => e.name), ['Coucher.jpg', 'Hotel.pdf', 'Danse.mp4', 'Plage.jpg']);
+  assert.ok(carte.cover.every((e) => e.key && e.previewUrl && e.available));
+  assert.deepStrictEqual(carte.sender, { id: Ex, name: 'Clarisse', avatarUrl: null });
+  assert.strictEqual(carte.downloadsLeft, 3);
+  assert.strictEqual(carte.savedCount, 0);
+  assert.strictEqual(carte.tracking, undefined);
+  const vueExpediteur = await svc.shareInfo(Ex, p.shareId);
+  assert.deepStrictEqual(vueExpediteur.tracking, { members: 2, downloaded: 0, saved: 0 });
+  assert.deepStrictEqual(vueExpediteur.fileIds, [coucher.id, hotel.id, danse.id, plage.id], 'pour « Envoyer ailleurs »');
+  assert.strictEqual(carte.fileIds, undefined, 'rien du coffre de l\'expéditeur pour les autres');
+
+  // Les éléments, par pages ; un partage simple rend son fichier en élément 0.
+  const { items, nextCursor } = await svc.shareItems(Dx, p.shareId);
+  assert.deepStrictEqual(items.map((i) => [i.position, i.name, i.family]), [
+    [0, 'Coucher.jpg', 'photos'], [1, 'Hotel.pdf', 'documents'], [2, 'Danse.mp4', 'videos'], [3, 'Plage.jpg', 'photos'],
+  ]);
+  assert.strictEqual(nextCursor, null);
+  assert.deepStrictEqual((await svc.shareItems(Dx, p.shareId, { cursor: 1 })).items.map((i) => i.position), [2, 3]);
+  const unSeul = (await svc.shareItems(Dx, simple.shareId)).items;
+  assert.deepStrictEqual(unSeul.map((i) => [i.id, i.name, i.available]), [[0, 'Seule.jpg', true]]);
+  lot9 = { Ex, Dx, Mx, Hx, conv, p, simple, selection, items, plage, danse, hotel, coucher, album };
+});
+
+test('lot 9 : un lot se télécharge élément par élément, compté une fois par 2 h', async () => {
+  const { Ex, Dx, p, items } = lot9;
+  await refuse(svc.shareDownload(Dx, p.shareId), 'SAFEBOX_SHARE_ITEM_REQUIRED');
+  await refuse(svc.shareDownload(Dx, p.shareId, { item: 999999 }), 'SAFEBOX_NOT_FOUND');
+  for (const i of items) {
+    const plan = await svc.shareDownload(Dx, p.shareId, { item: i.id });
+    assert.strictEqual(plan.file.id, null, 'rien du coffre de l\'expéditeur ne sort');
+    assert.ok(plan.blocks.length >= 1);
+  }
+  const [[n]] = await pool.query('SELECT COUNT(*) AS n FROM safebox_share_download WHERE share_id = ? AND alanyaID = ?', [p.shareId, Dx]);
+  assert.strictEqual(Number(n.n), 1, 'tout l\'album dans la fenêtre de 2 h : un seul téléchargement');
+  assert.strictEqual((await svc.shareInfo(Dx, p.shareId)).downloadsLeft, 2);
+  assert.deepStrictEqual((await svc.shareInfo(Ex, p.shareId)).tracking, { members: 2, downloaded: 1, saved: 0 });
+});
+
+test('lot 9 : garder un lot en fait un album, sans doublon d\'espace', async () => {
+  const { Ex, Mx, p, items } = lot9;
+  // Lina garde d'abord une vidéo seule, puis l'album entier.
+  const video = items.find((i) => i.name === 'Danse.mp4');
+  const seule = await svc.saveShare(Mx, p.shareId, { itemId: video.id });
+  assert.strictEqual(seule.family, 'videos');
+  const avant = (await svc.usageOf(Mx)).usedBytes;
+  const garde = await svc.saveShare(Mx, p.shareId);
+  assert.strictEqual(garde.folder.name, 'Kribi 2026');
+  assert.strictEqual(garde.folder.root, 'albums');
+  assert.strictEqual(garde.files, 4);
+  const apres = (await svc.usageOf(Mx)).usedBytes;
+  const [[nouveaux]] = await pool.query(
+    'SELECT SUM(b.stored_bytes + b.preview_bytes) AS t FROM safebox_blob b JOIN safebox_file f ON f.blob_id = b.id WHERE f.id IN (?)',
+    [[lot9.plage.id, lot9.hotel.id, lot9.coucher.id]],
+  );
+  assert.strictEqual(apres - avant, Number(nouveaux.t), 'seuls les contenus nouveaux comptent');
+  // Ce que Lina avait déjà (la vidéo) ne compte pas deux fois.
+  const [blobs] = await pool.query(
+    'SELECT COALESCE(SUM(t), 0) AS t FROM (SELECT DISTINCT b.id, b.stored_bytes + b.preview_bytes AS t FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id WHERE f.alanyaID = ? AND f.trashed_at IS NULL) x',
+    [Mx],
+  );
+  assert.strictEqual(apres, Number(blobs[0].t));
+  const contenu = await svc.listFolder(Mx, garde.folder.id);
+  assert.deepStrictEqual(contenu.files.map((f) => f.name).sort(), ['Coucher.jpg', 'Danse.mp4', 'Hotel.pdf', 'Plage.jpg']);
+  // Garder encore : un second album « (2) ».
+  assert.strictEqual((await svc.saveShare(Mx, p.shareId)).folder.name, 'Kribi 2026 (2)');
+  const carte = await svc.shareInfo(Mx, p.shareId);
+  assert.strictEqual(carte.savedCount, 4);
+  assert.deepStrictEqual((await svc.shareInfo(Ex, p.shareId)).tracking, { members: 2, downloaded: 1, saved: 1 });
+  // Pas d'espace : rien n'est gardé.
+  const Px = await compte('sans-place');
+  await pool.query('INSERT INTO conv_participants (conversID, alanyaID) VALUES (?, ?)', [lot9.conv, Px]);
+  const petit = createSafeboxService({
+    db: pool, getStorage: () => stockage, env, getSettings: async () => reglages, trashDays: async () => 30,
+    spaceFor: async () => ({ quotaBytes: 100, maxFileBytes: reglages.maxFileBytes, plus: false }),
+  });
+  await refuse(petit.saveShare(Px, p.shareId), 'SAFEBOX_QUOTA_EXCEEDED');
+  const [[dossiers]] = await pool.query('SELECT COUNT(*) AS n FROM safebox_folder WHERE alanyaID = ? AND parent_id IS NOT NULL', [Px]);
+  assert.strictEqual(Number(dossiers.n), 0, 'l\'album n\'est pas resté à moitié');
+  await pool.query('DELETE FROM conv_participants WHERE conversID = ? AND alanyaID = ?', [lot9.conv, Px]);
+});
+
+test('lot 9 : Reçus, suivi, badge des fichiers partagés en lot', async () => {
+  const { Ex, Dx, Hx, p, simple, selection, plage, danse, album } = lot9;
+  const recus = await svc.receivedShares(Dx);
+  assert.deepStrictEqual(recus.shares.map((s) => s.id), [selection.shareId, p.shareId, simple.shareId]);
+  const albumRecu = recus.shares.find((s) => s.id === p.shareId);
+  assert.strictEqual(albumRecu.kind, 'batch');
+  assert.strictEqual(albumRecu.count, 4);
+  assert.deepStrictEqual(albumRecu.sender, { id: Ex, name: 'Clarisse', avatarUrl: null });
+  assert.ok(albumRecu.receivedAt, 'téléchargé');
+  assert.ok(albumRecu.cover.previewUrl && albumRecu.cover.key);
+  const simpleRecu = recus.shares.find((s) => s.id === simple.shareId);
+  assert.strictEqual(simpleRecu.receivedAt, null);
+  assert.strictEqual(simpleRecu.quality, 'original');
+  assert.deepStrictEqual((await svc.receivedShares(Ex)).shares, [], 'mes envois n\'y sont pas');
+  assert.deepStrictEqual((await svc.receivedShares(Hx)).shares, [], 'pas membre : rien');
+  assert.deepStrictEqual((await svc.receivedShares(Dx, { cursor: selection.shareId })).shares.map((s) => s.id), [p.shareId, simple.shareId]);
+
+  // Le suivi : l'expéditeur seul.
+  await refuse(svc.shareRecipients(Dx, p.shareId), 'SAFEBOX_NOT_FOUND');
+  const suivi = await svc.shareRecipients(Ex, p.shareId);
+  assert.deepStrictEqual(suivi.members.map((m) => [m.name, m.state]), [['Lina', 'saved'], ['Paul', 'downloaded']]);
+  assert.deepStrictEqual(suivi.tracking, { members: 2, downloaded: 1, saved: 1 });
+
+  // Le badge d'un fichier compte aussi les partages en lot.
+  const vus = (await svc.listFolder(Ex, album.id)).files;
+  const badge = (f) => vus.find((x) => x.id === f.id).sent;
+  assert.deepStrictEqual(badge(danse), { shares: 2, recipients: 2, received: 2, lastConversationId: lot9.conv });
+  assert.deepStrictEqual(badge(plage), { shares: 2, recipients: 2, received: 2, lastConversationId: lot9.conv });
+});
+
+test('lot 9 : retirer le partage, fichier supprimé dans un lot, modération d\'un lot', async () => {
+  const { Ex, Dx, Hx, p, selection, plage, hotel } = lot9;
+  // Un élément mis à la corbeille par l'expéditeur n'est plus disponible ; le reste oui.
+  await svc.trashFile(Ex, hotel.id);
+  const carte = await svc.shareInfo(Dx, p.shareId);
+  assert.strictEqual(carte.availableCount, 3);
+  const hotelItem = (await svc.shareItems(Dx, p.shareId)).items.find((i) => i.name === 'Hotel.pdf');
+  assert.deepStrictEqual([hotelItem.available, hotelItem.key], [false, undefined]);
+  await refuse(svc.shareDownload(Dx, p.shareId, { item: hotelItem.id }), 'SAFEBOX_SHARE_REVOKED');
+
+  // Retirer le partage : l'expéditeur seul ; la carte le dit, le fichier reste chez lui.
+  await refuse(svc.revokeShare(Dx, selection.shareId), 'SAFEBOX_NOT_FOUND');
+  await refuse(svc.revokeShare(Hx, selection.shareId), 'SAFEBOX_NOT_FOUND');
+  assert.deepStrictEqual(await svc.revokeShare(Ex, selection.shareId), { id: selection.shareId, revoked: true });
+  assert.deepStrictEqual(await svc.revokeShare(Ex, selection.shareId), { id: selection.shareId, revoked: true }, 'rejouable');
+  const retiree = await svc.shareInfo(Dx, selection.shareId);
+  assert.deepStrictEqual(
+    [retiree.available, retiree.revokedBySender, retiree.removedByModeration, retiree.cover],
+    [false, true, false, []],
+  );
+  const [elementRetire] = (await svc.shareItems(Dx, selection.shareId)).items;
+  assert.strictEqual(elementRetire.available, false);
+  await refuse(svc.shareDownload(Dx, selection.shareId, { item: elementRetire.id }), 'SAFEBOX_SHARE_REVOKED');
+  assert.strictEqual((await svc.downloadFile(Ex, plage.id)).blocks.length, 1, 'le fichier reste dans le coffre');
+  await assert.rejects(resolveSafeboxShareFields(
+    { type: 11, content: JSON.stringify({ v: 1, share: selection.shareId }), senderID: Ex, conversationID: lot9.conv },
+    { db: pool },
+  ), (e) => e.code === 'SAFEBOX_SHARE_INVALID', 'un partage retiré ne repart pas dans un message');
+
+  // Modération d'un lot : un aperçu, tous ses contenus retirés puis supprimés partout.
+  const vu = await svc.moderationView(p.shareId);
+  assert.deepStrictEqual([vu.kind, vu.count], ['batch', 4]);
+  assert.ok(vu.preview.startsWith('data:image/jpeg;base64,'));
+  assert.ok(vu.activeShares >= 1);
+  assert.ok((await svc.moderationRevoke(p.shareId)).revoked >= 1);
+  const apres = await svc.shareInfo(Dx, p.shareId);
+  assert.deepStrictEqual([apres.available, apres.removedByModeration, apres.revokedBySender], [false, true, false]);
+  const sup = await svc.moderationDelete(p.shareId);
+  assert.strictEqual(sup.megaDeleted, true);
+  await refuse(svc.downloadFile(Ex, plage.id), 'SAFEBOX_NOT_FOUND');
+  assert.strictEqual((await svc.usageOf(lot9.Mx)).usedBytes, 0, 'les copies gardées partent aussi');
 });
 
 // ── Lot 4 : espace Alanya Plus ─────────────────────────────────────────────

@@ -285,41 +285,55 @@ function createSafeboxService({
 
   /**
    * Ce que sont devenus les partages de ces fichiers, pour le badge de
-   * l'expéditeur : partages actifs, destinataires (membres actuels des
-   * discussions, expéditeur exclu), et ceux d'entre eux qui l'ont reçu
-   * (téléchargé ou enregistré dans leur coffre). `received` est null sans la
-   * migration 104 ; sans la 102, aucun fichier n'a de partage.
+   * l'expéditeur : partages actifs (le fichier seul ou dans un lot, migration
+   * 109), destinataires (membres actuels des discussions, expéditeur exclu),
+   * ceux d'entre eux qui l'ont reçu (téléchargé ou gardé dans leur coffre), et
+   * la discussion du dernier partage (« Famille Ngono · téléchargé par 5 sur
+   * 8 »). `received` est null sans la migration 104 ; sans la 102, aucun
+   * fichier n'a de partage.
    */
   async function envoisDe(fileIds) {
     const ids = [...new Set(fileIds.map(Number).filter(Boolean))];
     const out = new Map();
     if (!ids.length) return out;
+    const partages = `SELECT s.id AS share_id, s.file_id, s.conversation_id, s.sender_id
+                        FROM safebox_share s
+                       WHERE s.file_id IN (?) AND s.revoked_at IS NULL
+                      UNION ALL
+                      SELECT s.id, i.file_id, s.conversation_id, s.sender_id
+                        FROM safebox_share_item i JOIN safebox_share s ON s.id = i.share_id
+                       WHERE i.file_id IN (?) AND s.revoked_at IS NULL`;
     try {
       const [rows] = await db.query(
-        `SELECT s.file_id, COUNT(DISTINCT s.id) AS partages, COUNT(DISTINCT cp.alanyaID) AS destinataires
-           FROM safebox_share s
-           LEFT JOIN conv_participants cp ON cp.conversID = s.conversation_id AND cp.alanyaID <> s.sender_id
-          WHERE s.file_id IN (?) AND s.revoked_at IS NULL
-          GROUP BY s.file_id`,
-        [ids],
+        `SELECT x.file_id, COUNT(DISTINCT x.share_id) AS partages, COUNT(DISTINCT cp.alanyaID) AS destinataires,
+                SUBSTRING_INDEX(GROUP_CONCAT(x.conversation_id ORDER BY x.share_id DESC), ',', 1) AS derniere
+           FROM (${partages}) x
+           LEFT JOIN conv_participants cp ON cp.conversID = x.conversation_id AND cp.alanyaID <> x.sender_id
+          GROUP BY x.file_id`,
+        [ids, ids],
       );
       for (const r of rows) {
-        out.set(Number(r.file_id), { shares: Number(r.partages), recipients: Number(r.destinataires), received: null });
+        out.set(Number(r.file_id), {
+          shares: Number(r.partages),
+          recipients: Number(r.destinataires),
+          received: null,
+          lastConversationId: Number(r.derniere) || null,
+        });
       }
     } catch (e) {
       if (e.code === 'ER_NO_SUCH_TABLE') return out;
       throw e;
     }
     if (!out.size) return out;
+    const avecPartage = [...out.keys()];
     try {
       const [rows] = await db.query(
-        `SELECT s.file_id, COUNT(DISTINCT r.alanyaID) AS recus
-           FROM safebox_share s
-           JOIN safebox_share_recipient r ON r.share_id = s.id
-           JOIN conv_participants cp ON cp.conversID = s.conversation_id AND cp.alanyaID = r.alanyaID
-          WHERE s.file_id IN (?) AND s.revoked_at IS NULL
-          GROUP BY s.file_id`,
-        [[...out.keys()]],
+        `SELECT x.file_id, COUNT(DISTINCT r.alanyaID) AS recus
+           FROM (${partages}) x
+           JOIN safebox_share_recipient r ON r.share_id = x.share_id
+           JOIN conv_participants cp ON cp.conversID = x.conversation_id AND cp.alanyaID = r.alanyaID
+          GROUP BY x.file_id`,
+        [avecPartage, avecPartage],
       );
       for (const v of out.values()) v.received = 0;
       for (const r of rows) out.get(Number(r.file_id)).received = Number(r.recus);
@@ -1315,15 +1329,23 @@ function createSafeboxService({
     return supprimerDefinitivement(ready(), alanyaID, { dossierId: id });
   }
 
-  // ── Partage entre inscrits (lot 3) ───────────────────────────────────────
+  // ── Partage entre inscrits (lots 3 et 9) ─────────────────────────────────
   //
   // Le message (type 11, utils/safeboxShareMessage.js) ne porte que le numéro
   // du partage. Tout le reste est remis ici, aux membres ACTUELS de la
   // discussion : un membre qui quitte un groupe perd l'accès. Le fichier reste
   // dans le coffre de l'expéditeur, sur son espace ; dès qu'il le met à la
   // corbeille, le partage est retiré.
+  //
+  // Un partage porte un fichier (`kind` « file », `file_id`) ou, depuis le
+  // lot 9, un lot — un album ou une sélection — dont les éléments sont dans
+  // `safebox_share_item` (migration 109). La limite de téléchargements compte
+  // par partage : ce qui est téléchargé d'un même lot dans les deux heures
+  // compte une fois.
 
   const retire = () => new SafeboxError('SAFEBOX_SHARE_REVOKED', 410, "Fichier retiré par l'expéditeur");
+  const estLot = (s) => s.kind === 'batch';
+  const avatar = (url) => (url && url !== 'NON DEFINI' ? url : null);
 
   async function estMembre(conn, conversationId, alanyaID) {
     const [r] = await conn.query(
@@ -1333,31 +1355,102 @@ function createSafeboxService({
     return r.length > 0;
   }
 
-  /** `POST /api/safebox/shares` — partager un fichier de mon coffre dans une discussion dont je suis membre. */
+  /** Les fichiers d'un nouveau partage : un album (`folderId`), plusieurs (`fileIds`) ou un seul (`fileId`). */
+  async function fichiersAPartager(alanyaID, body) {
+    if (body.folderId != null) {
+      const dossier = await liveFolder(db, alanyaID, body.folderId);
+      const [rows] = await db.query(
+        `${FICHIER} WHERE f.folder_id = ? AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+          ORDER BY f.id DESC LIMIT ${C.SHARE_MAX_ITEMS + 1}`,
+        [dossier.id, alanyaID],
+      );
+      if (!rows.length) throw new SafeboxError('SAFEBOX_SHARE_INVALID', 400, 'Cet album est vide');
+      if (rows.length > C.SHARE_MAX_ITEMS) {
+        throw new SafeboxError('SAFEBOX_SHARE_TOO_MANY', 400, `${C.SHARE_MAX_ITEMS} fichiers au plus par partage`, {
+          max: C.SHARE_MAX_ITEMS,
+        });
+      }
+      return { fichiers: rows, lot: true, titre: dossier.name };
+    }
+    if (body.fileIds != null) {
+      const ids = R.shareFileIds(body.fileIds);
+      const [rows] = await db.query(
+        `${FICHIER} WHERE f.id IN (?) AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'`,
+        [ids, alanyaID],
+      );
+      if (rows.length !== ids.length) throw introuvable();
+      const parId = new Map(rows.map((r) => [Number(r.id), r]));
+      return { fichiers: ids.map((id) => parId.get(id)), lot: ids.length > 1, titre: null };
+    }
+    return { fichiers: [await liveFile(db, alanyaID, body.fileId)], lot: false, titre: null };
+  }
+
+  /**
+   * `POST /api/safebox/shares` — partager dans une discussion dont je suis
+   * membre : un fichier (`fileId`), plusieurs (`fileIds`, avec un `title`) ou
+   * un album (`folderId` : ses fichiers, sans les sous-dossiers). Un seul
+   * fichier fait un partage simple, que les anciennes applications lisent.
+   * `cover` : mes fichiers des quatre premiers éléments, d'où l'application
+   * tire les mini-images floues du message.
+   */
   async function createShare(alanyaID, body = {}) {
     ready();
     const conv = R.parseId(body.conversationId);
     if (!conv) throw introuvable();
-    const f = await liveFile(db, alanyaID, body.fileId);
+    const { fichiers, lot, titre } = await fichiersAPartager(alanyaID, body);
     if (!(await estMembre(db, conv, alanyaID))) throw introuvable();
-    const [r] = await db.query(
-      `INSERT INTO safebox_share (file_id, conversation_id, sender_id, name, mime, family, plain_bytes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [f.id, conv, alanyaID, f.name, f.mime, f.family, Number(f.plain_bytes)],
-    );
+    if (!lot) {
+      const f = fichiers[0];
+      const [r] = await db.query(
+        `INSERT INTO safebox_share (file_id, conversation_id, sender_id, name, mime, family, plain_bytes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [f.id, conv, alanyaID, f.name, f.mime, f.family, Number(f.plain_bytes)],
+      );
+      return {
+        shareId: r.insertId,
+        kind: 'file',
+        name: f.name,
+        mime: f.mime,
+        family: f.family,
+        plainBytes: Number(f.plain_bytes),
+        count: 1,
+        families: null,
+        meta: await metaDe(f.blob_id),
+        cover: [Number(f.id)],
+      };
+    }
+    const resume = R.batchSummary(fichiers);
+    const nom = body.title != null ? R.normalizeName(body.title, C.FILE_NAME_MAX) : (titre || fichiers[0].name);
+    const shareId = await tx(async (conn) => {
+      const [r] = await conn.query(
+        `INSERT INTO safebox_share (file_id, kind, conversation_id, sender_id, name, mime, family, plain_bytes, item_count, families)
+         VALUES (NULL, 'batch', ?, ?, ?, NULL, ?, ?, ?, ?)`,
+        [conv, alanyaID, nom, resume.family, resume.plainBytes, resume.count, JSON.stringify(resume.families)],
+      );
+      await conn.query(
+        'INSERT INTO safebox_share_item (share_id, position, file_id, name, mime, family, plain_bytes) VALUES ?',
+        [fichiers.map((f, i) => [r.insertId, i, f.id, f.name, f.mime, f.family, Number(f.plain_bytes)])],
+      );
+      return r.insertId;
+    });
     return {
-      shareId: r.insertId,
-      name: f.name,
-      mime: f.mime,
-      family: f.family,
-      plainBytes: Number(f.plain_bytes),
-      meta: await metaDe(f.blob_id),
+      shareId,
+      kind: 'batch',
+      name: nom,
+      mime: null,
+      family: resume.family,
+      plainBytes: resume.plainBytes,
+      count: resume.count,
+      families: resume.families,
+      meta: null,
+      cover: fichiers.slice(0, 4).map((f) => Number(f.id)),
     };
   }
 
   /**
-   * Le partage si le demandeur est membre de sa discussion (sinon 404), et le
-   * fichier de l'expéditeur s'il est encore disponible (hors corbeille).
+   * Le partage si le demandeur est membre de sa discussion (sinon 404), et,
+   * pour un fichier seul, celui de l'expéditeur s'il est encore disponible
+   * (hors corbeille, partage non retiré).
    */
   async function partageVisible(alanyaID, shareId) {
     const id = R.parseId(shareId);
@@ -1380,6 +1473,57 @@ function createSafeboxService({
     return { s, fichier };
   }
 
+  /**
+   * Les éléments d'un lot dans l'ordre, après la position `apres`, chacun avec
+   * le fichier de l'expéditeur s'il est encore disponible (null sinon, et
+   * pour tous quand le partage est retiré).
+   */
+  async function elementsDu(s, { apres = -1, limite = C.SHARE_MAX_ITEMS } = {}) {
+    const [items] = await db.query(
+      'SELECT * FROM safebox_share_item WHERE share_id = ? AND position > ? ORDER BY position LIMIT ?',
+      [s.id, apres, limite],
+    );
+    const ids = s.revoked_at ? [] : items.map((i) => i.file_id).filter(Boolean);
+    const vivants = new Map();
+    if (ids.length) {
+      const [rows] = await db.query(
+        `${FICHIER} WHERE f.id IN (?) AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'`,
+        [ids, s.sender_id],
+      );
+      for (const f of rows) vivants.set(Number(f.id), f);
+    }
+    return items.map((item) => ({ item, fichier: vivants.get(Number(item.file_id)) ?? null }));
+  }
+
+  /** Un élément d'un lot (404 s'il n'en fait pas partie), et son fichier s'il est disponible. */
+  async function elementDuLot(s, itemId) {
+    const id = R.parseId(itemId);
+    if (!id) {
+      throw new SafeboxError('SAFEBOX_SHARE_ITEM_REQUIRED', 400, 'Mettez à jour Alanya pour ouvrir ce partage');
+    }
+    const [[item]] = await db.query('SELECT * FROM safebox_share_item WHERE id = ? AND share_id = ?', [id, s.id]);
+    if (!item) throw introuvable();
+    if (s.revoked_at || !item.file_id) return null;
+    const [[f]] = await db.query(
+      `${FICHIER} WHERE f.id = ? AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'`,
+      [item.file_id, s.sender_id],
+    );
+    return f || null;
+  }
+
+  /** Mes fichiers (hors corbeille) qui désignent ces contenus : blob → fichier. */
+  async function mesContenus(alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    const out = new Map();
+    if (!ids.length) return out;
+    const [rows] = await db.query(
+      'SELECT MIN(id) AS id, blob_id FROM safebox_file WHERE alanyaID = ? AND blob_id IN (?) AND trashed_at IS NULL GROUP BY blob_id',
+      [alanyaID, ids],
+    );
+    for (const r of rows) out.set(Number(r.blob_id), Number(r.id));
+    return out;
+  }
+
   async function telechargementsRestants(conn, shareId, alanyaID, limite) {
     const [[r]] = await conn.query(
       `SELECT COUNT(*) AS n FROM safebox_share_download
@@ -1389,31 +1533,164 @@ function createSafeboxService({
     return Math.max(0, limite - Number(r.n));
   }
 
-  const shareShape = (s, fichier, extra = {}) => ({
+  const shareShape = (s, disponible, extra = {}) => ({
     id: Number(s.id),
     conversationId: Number(s.conversation_id),
     senderId: Number(s.sender_id),
+    kind: estLot(s) ? 'batch' : 'file',
     name: s.name,
     mime: s.mime,
     family: s.family,
     plainBytes: Number(s.plain_bytes),
+    count: estLot(s) ? Number(s.item_count) : 1,
+    families: estLot(s) ? R.normalizeFamilies(s.families) : null,
     createdAt: s.created_at,
-    available: Boolean(fichier),
-    // Seule la modération retire un partage (le retrait par l'expéditeur
-    // passe par la corbeille) : la carte le dit autrement.
-    removedByModeration: Boolean(s.revoked_at),
+    available: Boolean(disponible),
+    // Retiré par l'expéditeur (« Retirer le partage », lot 9) ou par la
+    // modération ; mis à la corbeille, le fichier rend seulement `available` faux.
+    removedByModeration: Boolean(s.revoked_at) && s.revoked_by !== 'sender',
+    revokedBySender: Boolean(s.revoked_at) && s.revoked_by === 'sender',
     ...extra,
   });
 
-  /** `GET /api/safebox/shares/:id` — la carte du message : état, aperçu, clé (membres seulement). */
+  /**
+   * Un élément tel que l'écran ouvert depuis la carte l'affiche, clé comprise
+   * (le demandeur est membre de la discussion). `id` 0 désigne le fichier
+   * d'un partage simple.
+   */
+  async function elementShape(storage, { item, fichier: f }, details, miens) {
+    const out = {
+      id: Number(item.id),
+      position: Number(item.position),
+      name: item.name,
+      ext: R.extensionOf(item.name),
+      mime: item.mime,
+      family: item.family,
+      plainBytes: Number(item.plain_bytes),
+      available: Boolean(f),
+    };
+    if (!f) return out;
+    const d = details.get(Number(f.blob_id));
+    out.storedBytes = taille(f);
+    out.quality = R.qualityName(f.compressed);
+    out.meta = d?.meta ?? null;
+    out.lost = Boolean(d?.lostAt);
+    out.key = unwrapFileKey(f.wrapped_key, f.blob_id, env).toString('base64');
+    out.previewUrl = Number(f.preview_bytes) > 0
+      ? await storage.downloadUrl(R.previewKey(f.prefix), C.PREVIEW_URL_TTL_S)
+      : null;
+    out.savedFileId = miens.get(Number(f.blob_id)) ?? null;
+    return out;
+  }
+
+  /** Le fichier d'un partage simple, vu comme l'élément 0. */
+  const elementSimple = (s, fichier) => ({
+    item: { id: 0, position: 0, name: s.name, mime: s.mime, family: s.family, plain_bytes: s.plain_bytes },
+    fichier,
+  });
+
+  async function elementsShape(storage, alanyaID, elements) {
+    const blobs = elements.filter((e) => e.fichier).map((e) => e.fichier.blob_id);
+    const details = await detailsDe(blobs);
+    const miens = await mesContenus(alanyaID, blobs);
+    return Promise.all(elements.map((e) => elementShape(storage, e, details, miens)));
+  }
+
+  async function expediteurDe(s) {
+    const [[u]] = await db.query('SELECT nom, pseudo, avatar_url FROM users WHERE alanyaID = ?', [s.sender_id]);
+    return { id: Number(s.sender_id), name: u ? (u.nom || u.pseudo || null) : null, avatarUrl: avatar(u?.avatar_url) };
+  }
+
+  /** Les contenus d'un partage (fichier seul ou éléments d'un lot), tant que les fichiers existent. */
+  async function blobsDu(s) {
+    const [rows] = estLot(s)
+      ? await db.query(
+        `SELECT DISTINCT f.blob_id FROM safebox_share_item i JOIN safebox_file f ON f.id = i.file_id
+          WHERE i.share_id = ?`,
+        [s.id],
+      )
+      : await db.query('SELECT blob_id FROM safebox_file WHERE id = ?', [s.file_id || 0]);
+    return rows.map((r) => Number(r.blob_id));
+  }
+
+  /**
+   * Le suivi chez l'expéditeur : chaque membre actuel de la discussion (sauf
+   * lui), et s'il a gardé le contenu dans son coffre, l'a téléchargé, ou pas
+   * encore.
+   */
+  async function suiviDu(s) {
+    const [membres] = await db.query(
+      `SELECT u.alanyaID, u.nom, u.pseudo, u.avatar_url
+         FROM conv_participants cp JOIN users u ON u.alanyaID = cp.alanyaID
+        WHERE cp.conversID = ? AND cp.alanyaID <> ?
+        ORDER BY u.nom, u.alanyaID`,
+      [s.conversation_id, s.sender_id],
+    );
+    const recus = new Map();
+    try {
+      const [rows] = await db.query('SELECT alanyaID, received_at FROM safebox_share_recipient WHERE share_id = ?', [s.id]);
+      for (const r of rows) recus.set(Number(r.alanyaID), r.received_at);
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+    }
+    const gardes = new Set();
+    const blobs = await blobsDu(s);
+    if (blobs.length && membres.length) {
+      const [rows] = await db.query(
+        'SELECT DISTINCT alanyaID FROM safebox_file WHERE blob_id IN (?) AND alanyaID IN (?) AND trashed_at IS NULL',
+        [blobs, membres.map((m) => m.alanyaID)],
+      );
+      for (const r of rows) gardes.add(Number(r.alanyaID));
+    }
+    return membres.map((m) => {
+      const id = Number(m.alanyaID);
+      return {
+        alanyaID: id,
+        name: m.nom || m.pseudo || null,
+        avatarUrl: avatar(m.avatar_url),
+        state: gardes.has(id) ? 'saved' : recus.has(id) ? 'downloaded' : 'pending',
+        at: recus.get(id) ?? null,
+      };
+    });
+  }
+
+  const resumeSuivi = (membres) => ({
+    members: membres.length,
+    downloaded: membres.filter((m) => m.state === 'downloaded').length,
+    saved: membres.filter((m) => m.state === 'saved').length,
+  });
+
+  /**
+   * `GET /api/safebox/shares/:id` — la carte du message : état, expéditeur,
+   * aperçu et clé (membres seulement). Un lot rend les quatre premiers
+   * éléments disponibles (`cover`, la mosaïque) ; l'expéditeur reçoit en plus
+   * le résumé du suivi (`tracking`, « téléchargé par 2 sur 7 ») et ses
+   * fichiers encore disponibles (`fileIds`, pour « Envoyer ailleurs »).
+   */
   async function shareInfo(alanyaID, shareId) {
     const storage = ready();
     const settings = await getSettings();
     const { s, fichier } = await partageVisible(alanyaID, shareId);
     const expediteur = Number(s.sender_id) === Number(alanyaID);
-    const extra = { isSender: expediteur };
+    const extra = { isSender: expediteur, sender: await expediteurDe(s) };
+    if (expediteur) extra.tracking = resumeSuivi(await suiviDu(s));
+    if (estLot(s)) {
+      const dispo = (await elementsDu(s)).filter((e) => e.fichier);
+      extra.availableCount = dispo.length;
+      if (expediteur) extra.fileIds = dispo.map((e) => Number(e.fichier.id));
+      extra.cover = await elementsShape(storage, alanyaID, dispo.slice(0, 4));
+      if (dispo.length) {
+        extra.downloadsLeft = expediteur
+          ? null
+          : await telechargementsRestants(db, s.id, alanyaID, settings.shareDownloadsPerDay);
+        extra.savedCount = (await mesContenus(alanyaID, dispo.map((e) => e.fichier.blob_id))).size;
+      }
+      return shareShape(s, dispo.length > 0, extra);
+    }
+    if (expediteur) extra.fileIds = fichier ? [Number(fichier.id)] : [];
     if (fichier) {
       extra.storedBytes = taille(fichier);
+      extra.quality = R.qualityName(fichier.compressed);
       extra.key = unwrapFileKey(fichier.wrapped_key, fichier.blob_id, env).toString('base64');
       extra.previewUrl = Number(fichier.preview_bytes) > 0
         ? await storage.downloadUrl(R.previewKey(fichier.prefix), C.PREVIEW_URL_TTL_S)
@@ -1421,11 +1698,7 @@ function createSafeboxService({
       extra.downloadsLeft = expediteur
         ? null
         : await telechargementsRestants(db, s.id, alanyaID, settings.shareDownloadsPerDay);
-      const [[mien]] = await db.query(
-        'SELECT id FROM safebox_file WHERE alanyaID = ? AND blob_id = ? AND trashed_at IS NULL LIMIT 1',
-        [alanyaID, fichier.blob_id],
-      );
-      extra.savedFileId = mien ? Number(mien.id) : null;
+      extra.savedFileId = (await mesContenus(alanyaID, [fichier.blob_id])).get(Number(fichier.blob_id)) ?? null;
       const d = (await detailsDe([fichier.blob_id])).get(Number(fichier.blob_id));
       extra.meta = d?.meta ?? null;
       extra.lost = Boolean(d?.lostAt);
@@ -1434,16 +1707,39 @@ function createSafeboxService({
   }
 
   /**
-   * `GET /api/safebox/shares/:id/download` — clé et adresses de tous les
-   * blocs. Un téléchargement compte une fois par fenêtre de deux heures :
-   * renouveler les adresses d'un gros fichier ne coûte rien. L'expéditeur
-   * n'est jamais limité.
+   * `GET /api/safebox/shares/:id/items` — les éléments, par pages de 100
+   * (curseur : la position du dernier). Un partage simple rend son fichier
+   * comme élément 0.
    */
-  async function shareDownload(alanyaID, shareId) {
+  async function shareItems(alanyaID, shareId, { cursor } = {}) {
+    const storage = ready();
+    const { s, fichier } = await partageVisible(alanyaID, shareId);
+    const n = Number(cursor);
+    const apres = cursor != null && cursor !== '' && Number.isSafeInteger(n) && n >= 0 ? n : -1;
+    let elements;
+    if (estLot(s)) elements = await elementsDu(s, { apres, limite: C.PAGE_SIZE });
+    else elements = apres < 0 ? [elementSimple(s, fichier)] : [];
+    return {
+      items: await elementsShape(storage, alanyaID, elements),
+      nextCursor: estLot(s) && elements.length === C.PAGE_SIZE
+        ? Number(elements[elements.length - 1].item.position)
+        : null,
+    };
+  }
+
+  /**
+   * `GET /api/safebox/shares/:id/download` — clé et adresses de tous les
+   * blocs ; pour un lot, ceux de l'élément `item`. Un téléchargement compte
+   * une fois par partage et par fenêtre de deux heures : renouveler les
+   * adresses d'un gros fichier, ou prendre un autre élément du même lot, ne
+   * coûte rien. L'expéditeur n'est jamais limité.
+   */
+  async function shareDownload(alanyaID, shareId, query = {}) {
     const storage = ready();
     const settings = await getSettings();
     const { s, fichier } = await partageVisible(alanyaID, shareId);
-    if (!fichier) throw retire();
+    const cible = estLot(s) ? await elementDuLot(s, query.item) : fichier;
+    if (!cible) throw retire();
     if (Number(s.sender_id) !== Number(alanyaID)) {
       await tx(async (conn) => {
         // Verrou du partage : deux demandes simultanées ne comptent qu'une fois.
@@ -1463,41 +1759,44 @@ function createSafeboxService({
       });
       await noterDestinataire(s.id, alanyaID);
     }
-    const plan = await planDeTelechargement(storage, fichier);
+    const plan = await planDeTelechargement(storage, cible);
     // Rien du coffre de l'expéditeur (numéro de fichier, dossier) ne sort.
     plan.file = { ...plan.file, id: null, folderId: null };
-    return { share: shareShape(s, fichier), ...plan };
+    return { share: shareShape(s, true), ...plan };
   }
 
   /**
-   * `POST /api/safebox/shares/:id/save` — enregistrer dans mon coffre. Rien
-   * n'est copié chez MEGA : mon fichier désigne les mêmes blocs. Il compte
-   * pourtant dans mon espace, et survit au retrait par l'expéditeur.
+   * `POST /api/safebox/shares/:id/save` — garder dans mon coffre. Rien n'est
+   * copié chez MEGA : mon fichier désigne les mêmes blocs. Il compte pourtant
+   * dans mon espace, et survit au retrait par l'expéditeur. Pour un lot :
+   * l'élément `itemId`, ou, sans lui, le lot entier en album.
    */
   async function saveShare(alanyaID, shareId, body = {}) {
     const storage = ready();
     const settings = await getSettings();
     const { s, fichier } = await partageVisible(alanyaID, shareId);
-    if (!fichier) throw retire();
+    if (estLot(s) && body.itemId == null) return garderLeLot(alanyaID, s, settings);
+    const cible = estLot(s) ? await elementDuLot(s, body.itemId) : fichier;
+    if (!cible) throw retire();
     const quotaBytes = await quotaFor(alanyaID, settings);
     const racines = await ensureAccount(alanyaID);
     const id = await tx(async (conn) => {
       await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
       const [[deja]] = await conn.query(
         'SELECT id FROM safebox_file WHERE alanyaID = ? AND blob_id = ? AND trashed_at IS NULL LIMIT 1',
-        [alanyaID, fichier.blob_id],
+        [alanyaID, cible.blob_id],
       );
       if (deja) return Number(deja.id);
-      const dossier = await liveFolder(conn, alanyaID, body.folderId ?? racines[fichier.family].id);
-      if (!R.acceptsFamily(dossier.root, fichier.family)) {
-        throw new SafeboxError('SAFEBOX_WRONG_FAMILY', 400, "Ce dossier n'accepte pas ce type de fichier", { expectedRoot: fichier.family });
+      const dossier = await liveFolder(conn, alanyaID, body.folderId ?? racines[cible.family].id);
+      if (!R.acceptsFamily(dossier.root, cible.family)) {
+        throw new SafeboxError('SAFEBOX_WRONG_FAMILY', 400, "Ce dossier n'accepte pas ce type de fichier", { expectedRoot: cible.family });
       }
       // Verrou du blob, puis son état : une purge ne peut pas l'emporter
       // pendant qu'on le désigne (voir markIfOrphan dans purge.js).
-      const [[b]] = await conn.query('SELECT status FROM safebox_blob WHERE id = ? FOR UPDATE', [fichier.blob_id]);
+      const [[b]] = await conn.query('SELECT status FROM safebox_blob WHERE id = ? FOR UPDATE', [cible.blob_id]);
       if (!b || b.status !== 'ready') throw retire();
       const { usedBytes } = await usageOf(conn, alanyaID);
-      const ajout = taille(fichier);
+      const ajout = taille(cible);
       if (!R.fitsQuota({ usedBytes, quotaBytes, addBytes: ajout })) {
         throw new SafeboxError('SAFEBOX_QUOTA_EXCEEDED', 409, 'Espace du coffre insuffisant', {
           usedBytes, quotaBytes, neededBytes: ajout,
@@ -1506,13 +1805,175 @@ function createSafeboxService({
       const [r] = await conn.query(
         `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [alanyaID, dossier.id, fichier.blob_id, fichier.name, fichier.ext, fichier.mime, fichier.family,
-          fichier.original_bytes, Number(fichier.compressed)],
+        [alanyaID, dossier.id, cible.blob_id, cible.name, cible.ext, cible.mime, cible.family,
+          cible.original_bytes, Number(cible.compressed)],
       );
       return r.insertId;
     });
     if (Number(s.sender_id) !== Number(alanyaID)) await noterDestinataire(s.id, alanyaID);
     return fileShape(await liveFile(db, alanyaID, id), storage);
+  }
+
+  /**
+   * Un lot gardé devient un album dans mes Albums, au nom du lot (« Kribi
+   * 2026 (2) » si le nom est pris), avec chaque élément encore disponible.
+   * L'espace ne compte que les contenus que je n'avais pas déjà.
+   */
+  async function garderLeLot(alanyaID, s, settings) {
+    const elements = (await elementsDu(s)).filter((e) => e.fichier);
+    if (!elements.length) throw retire();
+    const quotaBytes = await quotaFor(alanyaID, settings);
+    const racines = await ensureAccount(alanyaID);
+    const { albumId, ajoutes } = await tx(async (conn) => {
+      await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
+      const parent = await liveFolder(conn, alanyaID, racines.albums.id);
+      const [[n]] = await conn.query(
+        'SELECT COUNT(*) AS n FROM safebox_folder WHERE alanyaID = ? AND parent_id IS NOT NULL',
+        [alanyaID],
+      );
+      if (Number(n.n) >= settings.maxFolders) {
+        throw new SafeboxError('SAFEBOX_FOLDER_LIMIT', 409, 'Trop de dossiers', { maxFolders: settings.maxFolders });
+      }
+      const base = R.normalizeName([...s.name].slice(0, C.FOLDER_NAME_MAX).join(''), C.FOLDER_NAME_MAX);
+      const nom = R.freeName(base, await siblingNames(conn, parent.id), C.FOLDER_NAME_MAX);
+      const [r] = await conn.query(
+        'INSERT INTO safebox_folder (alanyaID, parent_id, root, name, depth) VALUES (?, ?, ?, ?, ?)',
+        [alanyaID, parent.id, parent.root, nom, Number(parent.depth) + 1],
+      );
+      await conn.query('UPDATE safebox_folder SET path = ? WHERE id = ?', [R.childPath(parent.path, r.insertId), r.insertId]);
+      // Verrou des blobs : voir saveShare.
+      const blobs = [...new Set(elements.map((e) => Number(e.fichier.blob_id)))];
+      const [etats] = await conn.query('SELECT id, status FROM safebox_blob WHERE id IN (?) FOR UPDATE', [blobs]);
+      const prets = new Set(etats.filter((b) => b.status === 'ready').map((b) => Number(b.id)));
+      const { usedBytes: avant } = await usageOf(conn, alanyaID);
+      const vus = new Set();
+      for (const { fichier: f } of elements) {
+        const blob = Number(f.blob_id);
+        if (!prets.has(blob) || vus.has(blob)) continue;
+        vus.add(blob);
+        await conn.query(
+          `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [alanyaID, r.insertId, blob, f.name, f.ext, f.mime, f.family, f.original_bytes, Number(f.compressed)],
+        );
+      }
+      if (!vus.size) throw retire();
+      const { usedBytes: apres } = await usageOf(conn, alanyaID);
+      if (!R.fitsQuota({ usedBytes: avant, quotaBytes, addBytes: apres - avant })) {
+        throw new SafeboxError('SAFEBOX_QUOTA_EXCEEDED', 409, 'Espace du coffre insuffisant', {
+          usedBytes: avant, quotaBytes, neededBytes: apres - avant,
+        });
+      }
+      return { albumId: r.insertId, ajoutes: vus.size };
+    });
+    if (Number(s.sender_id) !== Number(alanyaID)) await noterDestinataire(s.id, alanyaID);
+    const [[album]] = await db.query(
+      'SELECT id, parent_id, root, name, depth, created_at, updated_at FROM safebox_folder WHERE id = ?',
+      [albumId],
+    );
+    return { folder: folderShape(album), files: ajoutes };
+  }
+
+  /**
+   * `GET /api/safebox/shares/received` — l'onglet « Reçus » : ce qu'on m'a
+   * envoyé par le coffre, toutes discussions confondues (celles dont je suis
+   * membre aujourd'hui), du plus récent au plus ancien. Chaque partage vient
+   * avec son expéditeur, l'aperçu de son premier élément disponible, et ce
+   * que j'en ai fait (téléchargé, gardé).
+   */
+  async function receivedShares(alanyaID, { cursor } = {}) {
+    const storage = ready();
+    const avant = R.parseId(cursor);
+    const [rows] = await db.query(
+      `SELECT s.*, u.nom AS sender_nom, u.pseudo AS sender_pseudo, u.avatar_url AS sender_avatar
+         FROM safebox_share s
+         JOIN conv_participants cp ON cp.conversID = s.conversation_id AND cp.alanyaID = ?
+         JOIN users u ON u.alanyaID = s.sender_id
+        WHERE s.sender_id <> ? ${avant ? 'AND s.id < ?' : ''}
+        ORDER BY s.id DESC LIMIT ${C.RECEIVED_PAGE_SIZE}`,
+      avant ? [alanyaID, alanyaID, avant] : [alanyaID, alanyaID],
+    );
+    const recus = new Map();
+    if (rows.length) {
+      try {
+        const [r] = await db.query(
+          'SELECT share_id, received_at FROM safebox_share_recipient WHERE alanyaID = ? AND share_id IN (?)',
+          [alanyaID, rows.map((s) => s.id)],
+        );
+        for (const x of r) recus.set(Number(x.share_id), x.received_at);
+      } catch (e) {
+        if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+      }
+    }
+    const shares = [];
+    for (const s of rows) {
+      let premier = null;
+      if (!s.revoked_at) {
+        if (estLot(s)) {
+          const [[f]] = await db.query(
+            `${FICHIER} JOIN safebox_share_item i ON i.file_id = f.id
+              WHERE i.share_id = ? AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+              ORDER BY i.position LIMIT 1`,
+            [s.id, s.sender_id],
+          );
+          premier = f || null;
+        } else if (s.file_id) {
+          const [[f]] = await db.query(
+            `${FICHIER} WHERE f.id = ? AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'`,
+            [s.file_id, s.sender_id],
+          );
+          premier = f || null;
+        }
+      }
+      const extra = {
+        isSender: false,
+        sender: { id: Number(s.sender_id), name: s.sender_nom || s.sender_pseudo || null, avatarUrl: avatar(s.sender_avatar) },
+        receivedAt: recus.get(Number(s.id)) ?? null,
+        cover: null,
+        savedFileId: null,
+      };
+      if (premier) {
+        const element = { item: { id: 0, position: 0, name: premier.name, mime: premier.mime, family: premier.family, plain_bytes: premier.plain_bytes }, fichier: premier };
+        [extra.cover] = await elementsShape(storage, alanyaID, [element]);
+        if (!estLot(s)) {
+          extra.savedFileId = extra.cover.savedFileId;
+          extra.quality = extra.cover.quality;
+          extra.meta = extra.cover.meta;
+        }
+      }
+      shares.push(shareShape(s, premier, extra));
+    }
+    return {
+      shares,
+      nextCursor: rows.length === C.RECEIVED_PAGE_SIZE ? Number(rows[rows.length - 1].id) : null,
+    };
+  }
+
+  /** `GET /api/safebox/shares/:id/recipients` — le suivi, pour l'expéditeur seul. */
+  async function shareRecipients(alanyaID, shareId) {
+    const { s } = await partageVisible(alanyaID, shareId);
+    if (Number(s.sender_id) !== Number(alanyaID)) throw introuvable();
+    const membres = await suiviDu(s);
+    return { members: membres, tracking: resumeSuivi(membres) };
+  }
+
+  /**
+   * `POST /api/safebox/shares/:id/revoke` — « Retirer le partage » : la carte
+   * affiche « Fichier retiré par l'expéditeur », le fichier reste dans son
+   * coffre. Les copies déjà gardées par les destinataires restent chez eux.
+   */
+  async function revokeShare(alanyaID, shareId) {
+    const id = R.parseId(shareId);
+    if (!id) throw introuvable();
+    const [[s]] = await db.query('SELECT id, revoked_at FROM safebox_share WHERE id = ? AND sender_id = ?', [id, alanyaID]);
+    if (!s) throw introuvable();
+    if (!s.revoked_at) {
+      await db.query(
+        "UPDATE safebox_share SET revoked_at = NOW(), revoked_by = 'sender' WHERE id = ? AND revoked_at IS NULL",
+        [id],
+      );
+    }
+    return { id, revoked: true };
   }
 
   // ── Fin d'Alanya Plus (lot 4) ────────────────────────────────────────────
@@ -1597,31 +2058,55 @@ function createSafeboxService({
 
   // ── Modération d'un fichier signalé (décision du 18/10/2026, point 7) ───
 
-  /** Le partage et son fichier, corbeille comprise, sans contrôle d'appartenance : admin seulement. */
+  /**
+   * Le partage et ses contenus, corbeille comprise, sans contrôle
+   * d'appartenance : admin seulement. Pour un lot, `fichier` est le premier
+   * élément qui a un aperçu (ce que voit la modération) et `blobIds` tous ses
+   * contenus.
+   */
   async function partagePourModeration(shareId) {
     const id = R.parseId(shareId);
     if (!id) throw introuvable();
     const [[s]] = await db.query('SELECT * FROM safebox_share WHERE id = ?', [id]);
     if (!s) throw introuvable();
-    let fichier = null;
-    if (s.file_id) {
-      const [[f]] = await db.query(`${FICHIER} WHERE f.id = ?`, [s.file_id]);
-      fichier = f || null;
+    let fichiers = [];
+    if (estLot(s)) {
+      [fichiers] = await db.query(
+        `${FICHIER} JOIN safebox_share_item i ON i.file_id = f.id WHERE i.share_id = ? ORDER BY i.position`,
+        [s.id],
+      );
+    } else if (s.file_id) {
+      [fichiers] = await db.query(`${FICHIER} WHERE f.id = ?`, [s.file_id]);
     }
-    return { s, fichier };
+    const fichier = fichiers.find((f) => Number(f.preview_bytes) > 0) || fichiers[0] || null;
+    return { s, fichier, blobIds: [...new Set(fichiers.map((f) => Number(f.blob_id)))] };
   }
 
   /**
-   * A — ce que voit la modération : le partage, son état, jusqu'où le fichier
+   * Partages actifs qui portent l'un de ces contenus, seul ou dans un lot
+   * (un destinataire a pu le renvoyer).
+   */
+  const PARTAGES_DES_CONTENUS = `SELECT sh.id FROM safebox_share sh JOIN safebox_file f ON f.id = sh.file_id
+                                  WHERE f.blob_id IN (?) AND sh.revoked_at IS NULL
+                                 UNION
+                                 SELECT sh.id FROM safebox_share sh
+                                   JOIN safebox_share_item i ON i.share_id = sh.id
+                                   JOIN safebox_file f ON f.id = i.file_id
+                                  WHERE f.blob_id IN (?) AND sh.revoked_at IS NULL`;
+
+  /**
+   * A — ce que voit la modération : le partage, son état, jusqu'où le contenu
    * s'est répandu, et son aperçu déchiffré par le serveur (quelques dizaines
-   * de Ko, jamais le fichier lui-même).
+   * de Ko, jamais le fichier lui-même). Un lot montre son premier aperçu.
    */
   async function moderationView(shareId) {
-    const { s, fichier } = await partagePourModeration(shareId);
+    const { s, fichier, blobIds } = await partagePourModeration(shareId);
     const out = {
       id: Number(s.id),
       conversationId: Number(s.conversation_id),
       senderId: Number(s.sender_id),
+      kind: estLot(s) ? 'batch' : 'file',
+      count: estLot(s) ? Number(s.item_count) : 1,
       name: s.name,
       mime: s.mime,
       family: s.family,
@@ -1637,21 +2122,18 @@ function createSafeboxService({
       previewError: false,
     };
     if (!fichier) return out;
-    const blobId = Number(fichier.blob_id);
-    const [[c]] = await db.query('SELECT COUNT(DISTINCT alanyaID) AS n FROM safebox_file WHERE blob_id = ?', [blobId]);
+    const [[c]] = await db.query('SELECT COUNT(DISTINCT alanyaID) AS n FROM safebox_file WHERE blob_id IN (?)', [blobIds]);
     out.vaults = Number(c.n);
-    const [[p]] = await db.query(
-      `SELECT COUNT(*) AS n FROM safebox_share sh JOIN safebox_file f ON f.id = sh.file_id
-        WHERE f.blob_id = ? AND sh.revoked_at IS NULL`,
-      [blobId],
-    );
+    const [[p]] = await db.query(`SELECT COUNT(*) AS n FROM (${PARTAGES_DES_CONTENUS}) x`, [blobIds, blobIds]);
     out.activeShares = Number(p.n);
     try {
       const [[r]] = await db.query(
         `SELECT COUNT(DISTINCT r.alanyaID) AS n FROM safebox_share_recipient r
-           JOIN safebox_share sh ON sh.id = r.share_id JOIN safebox_file f ON f.id = sh.file_id
-          WHERE f.blob_id = ?`,
-        [blobId],
+          WHERE r.share_id IN (
+            SELECT sh.id FROM safebox_share sh JOIN safebox_file f ON f.id = sh.file_id WHERE f.blob_id IN (?)
+            UNION
+            SELECT i.share_id FROM safebox_share_item i JOIN safebox_file f ON f.id = i.file_id WHERE f.blob_id IN (?))`,
+        [blobIds, blobIds],
       );
       out.recipients = Number(r.n);
     } catch (e) {
@@ -1672,45 +2154,49 @@ function createSafeboxService({
   }
 
   /**
-   * B — retire tous les partages actifs de ce contenu, quel que soit celui
-   * qui l'a envoyé (un destinataire a pu le renvoyer). Les copies déjà
-   * enregistrées dans des coffres restent : c'est C qui les efface.
+   * B — retire tous les partages actifs de ces contenus, quel que soit celui
+   * qui les a envoyés, seuls ou dans un lot. Les copies déjà gardées dans des
+   * coffres restent : c'est C qui les efface.
    */
   async function moderationRevoke(shareId) {
-    const { s, fichier } = await partagePourModeration(shareId);
+    const { s, blobIds } = await partagePourModeration(shareId);
     let n = 0;
-    if (fichier) {
-      const [r] = await db.query(
-        `UPDATE safebox_share sh JOIN safebox_file f ON f.id = sh.file_id
-            SET sh.revoked_at = NOW()
-          WHERE f.blob_id = ? AND sh.revoked_at IS NULL`,
-        [fichier.blob_id],
-      );
-      n += r.affectedRows;
+    if (blobIds.length) {
+      const [ids] = await db.query(PARTAGES_DES_CONTENUS, [blobIds, blobIds]);
+      if (ids.length) {
+        const [r] = await db.query(
+          "UPDATE safebox_share SET revoked_at = NOW(), revoked_by = 'moderation' WHERE id IN (?) AND revoked_at IS NULL",
+          [ids.map((x) => x.id)],
+        );
+        n += r.affectedRows;
+      }
     }
-    const [r2] = await db.query('UPDATE safebox_share SET revoked_at = NOW() WHERE id = ? AND revoked_at IS NULL', [s.id]);
+    const [r2] = await db.query(
+      "UPDATE safebox_share SET revoked_at = NOW(), revoked_by = 'moderation' WHERE id = ? AND revoked_at IS NULL",
+      [s.id],
+    );
     return { revoked: n + r2.affectedRows };
   }
 
   /**
-   * C — supprime le fichier partout : le coffre de l'expéditeur, les copies
-   * enregistrées par d'autres, puis les blocs chez MEGA. Irréversible. Les
-   * partages sont retirés d'abord : plus aucun « Enregistrer dans mon coffre »
-   * ne peut désigner le blob pendant la suppression.
+   * C — supprime le contenu partout (chaque élément, pour un lot) : le coffre
+   * de l'expéditeur, les copies gardées par d'autres, puis les blocs chez
+   * MEGA. Irréversible. Les partages sont retirés d'abord : plus aucun
+   * « Garder dans mon coffre » ne peut désigner ces blobs pendant la
+   * suppression.
    */
   async function moderationDelete(shareId) {
     const storage = ready();
-    const { fichier } = await partagePourModeration(shareId);
+    const { blobIds } = await partagePourModeration(shareId);
     const { revoked } = await moderationRevoke(shareId);
-    if (!fichier) return { revoked, files: 0, vaults: 0, megaDeleted: false };
-    const blobId = Number(fichier.blob_id);
+    if (!blobIds.length) return { revoked, files: 0, vaults: 0, megaDeleted: false };
     const [[c]] = await db.query(
-      'SELECT COUNT(*) AS n, COUNT(DISTINCT alanyaID) AS comptes FROM safebox_file WHERE blob_id = ?',
-      [blobId],
+      'SELECT COUNT(*) AS n, COUNT(DISTINCT alanyaID) AS comptes FROM safebox_file WHERE blob_id IN (?)',
+      [blobIds],
     );
-    await db.query('DELETE FROM safebox_file WHERE blob_id = ?', [blobId]);
-    const ramassage = await collectOrphans(db, storage, { blobIds: [blobId] });
-    return { revoked, files: Number(c.n), vaults: Number(c.comptes), megaDeleted: ramassage.supprimes === 1 };
+    await db.query('DELETE FROM safebox_file WHERE blob_id IN (?)', [blobIds]);
+    const ramassage = await collectOrphans(db, storage, { blobIds });
+    return { revoked, files: Number(c.n), vaults: Number(c.comptes), megaDeleted: ramassage.supprimes === blobIds.length };
   }
 
   return {
@@ -1728,8 +2214,12 @@ function createSafeboxService({
     largestFiles,
     createShare,
     shareInfo,
+    shareItems,
     shareDownload,
     saveShare,
+    receivedShares,
+    shareRecipients,
+    revokeShare,
     purgeExcess,
     moderationView,
     moderationRevoke,

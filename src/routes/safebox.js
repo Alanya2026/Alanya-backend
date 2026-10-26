@@ -227,44 +227,81 @@ router.get('/largest', auth, lecture, c.largestFiles);
  * @swagger
  * /api/safebox/shares:
  *   post:
- *     summary: "Partager un fichier de mon coffre dans une discussion dont je suis membre — { fileId, conversationId }"
+ *     summary: "Partager dans une discussion dont je suis membre — { conversationId, fileId | fileIds + title | folderId }"
  *     description: >
- *       Rend `{ shareId, name, mime, family, plainBytes }`. Le message de type 11 ne porte ensuite que
- *       `{ v: 1, share: shareId }` ; le serveur en réécrit le contenu (utils/safeboxShareMessage.js).
+ *       Un fichier fait un partage simple ; plusieurs fichiers (500 au plus) ou un album font un lot, une
+ *       seule carte. Rend `{ shareId, kind, name, family, plainBytes, count, families, meta, cover }` ;
+ *       `cover` : mes fichiers des quatre premiers éléments. Le message de type 11 ne porte ensuite que
+ *       `{ v: 1, share: shareId }` et les mini-images ; le serveur en réécrit le contenu
+ *       (utils/safeboxShareMessage.js).
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       400:
+ *         description: SAFEBOX_SHARE_TOO_MANY (max joint), SAFEBOX_SHARE_INVALID
+ * /api/safebox/shares/received:
+ *   get:
+ *     summary: "Onglet Reçus — ce qu'on m'a envoyé par le coffre, du plus récent au plus ancien (?cursor=)"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
  * /api/safebox/shares/{id}:
  *   get:
- *     summary: "La carte du message : disponible ou retiré, aperçu, clé, téléchargements restants (membres de la discussion)"
+ *     summary: "La carte du message : disponible ou retiré, expéditeur, aperçu, clé, téléchargements restants ; mosaïque d'un lot ; suivi pour l'expéditeur"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       404:
  *         description: SAFEBOX_NOT_FOUND — partage inconnu, ou plus membre de la discussion
+ * /api/safebox/shares/{id}/items:
+ *   get:
+ *     summary: "Les éléments d'un lot avec aperçu et clé, par pages de 100 (?cursor=) ; un partage simple rend son fichier (élément 0)"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
  * /api/safebox/shares/{id}/download:
  *   get:
- *     summary: "Clé et adresses de tous les blocs (15 minutes) — 3 téléchargements par destinataire et par 24 h"
+ *     summary: "Clé et adresses de tous les blocs (15 minutes), de l'élément ?item= pour un lot — 3 téléchargements par destinataire et par 24 h, un lot compté une fois par 2 h"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
  *     responses:
+ *       400:
+ *         description: SAFEBOX_SHARE_ITEM_REQUIRED — un lot se télécharge élément par élément
  *       410:
- *         description: SAFEBOX_SHARE_REVOKED — l'expéditeur a supprimé le fichier de son coffre
+ *         description: SAFEBOX_SHARE_REVOKED — l'expéditeur a supprimé le fichier ou retiré le partage
  *       429:
  *         description: SAFEBOX_DOWNLOAD_LIMIT (limit joint)
  * /api/safebox/shares/{id}/save:
  *   post:
- *     summary: "Enregistrer dans mon coffre — { folderId? } ; aucune copie chez MEGA, compté dans mon espace"
+ *     summary: "Garder dans mon coffre — { itemId?, folderId? } ; un lot entier devient un album ; aucune copie chez MEGA, compté dans mon espace"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ * /api/safebox/shares/{id}/recipients:
+ *   get:
+ *     summary: "Le suivi, pour l'expéditeur : chaque membre (gardé, téléchargé, pas encore)"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ * /api/safebox/shares/{id}/revoke:
+ *   post:
+ *     summary: "Retirer le partage (expéditeur) : la carte dit « retiré par l'expéditeur », le fichier reste dans son coffre"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
  */
 router.post('/shares', auth, ecriture, c.createShare);
+// Avant /shares/:id, que « received » ne prenne pas la place d'un numéro.
+router.get('/shares/received', auth, lecture, c.receivedShares);
 router.get('/shares/:id', auth, lecture, c.shareInfo);
+router.get('/shares/:id/items', auth, lecture, c.shareItems);
 router.get('/shares/:id/download', auth, lecture, c.shareDownload);
 router.post('/shares/:id/save', auth, ecriture, c.saveShare);
+router.get('/shares/:id/recipients', auth, lecture, c.shareRecipients);
+router.post('/shares/:id/revoke', auth, ecriture, c.revokeShare);
 
 /**
  * @swagger

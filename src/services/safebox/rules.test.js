@@ -237,4 +237,25 @@ test('commentaire d\'une photo : 200 caractères, 5 minutes', () => {
   refuse(() => R.validateNoteAudio({}), 'SAFEBOX_INVALID_SIZE');
 });
 
+test('partage en lot : fichiers distincts, 500 au plus (lot 9)', () => {
+  assert.deepStrictEqual(R.shareFileIds([3, '7', 3, 5]), [3, 7, 5], 'doublons retirés, ordre gardé');
+  for (const v of [null, undefined, [], [0], ['x'], [1, -2], '1,2']) refuse(() => R.shareFileIds(v), 'SAFEBOX_SHARE_INVALID');
+  assert.strictEqual(R.shareFileIds(Array.from({ length: 500 }, (_, i) => i + 1)).length, 500);
+  refuse(() => R.shareFileIds(Array.from({ length: 501 }, (_, i) => i + 1)), 'SAFEBOX_SHARE_TOO_MANY');
+});
+
+test('carte d\'un lot : nombre par type, type le plus nombreux, taille totale', () => {
+  const f = (family, plain_bytes) => ({ family, plain_bytes });
+  assert.deepStrictEqual(
+    R.batchSummary([f('photos', 10), f('videos', 100), f('videos', '200'), f('documents', 5)]),
+    { families: { photos: 1, videos: 2, documents: 1 }, family: 'videos', plainBytes: 315, count: 4 },
+  );
+  assert.strictEqual(R.batchSummary([f('documents', 1), f('photos', 1)]).family, 'photos', 'égalité : ordre des types');
+  assert.deepStrictEqual(R.normalizeFamilies('{"photos":35,"videos":6,"pirate":3,"audios":0}'), { photos: 35, videos: 6 });
+  assert.deepStrictEqual(R.normalizeFamilies({ documents: 1 }), { documents: 1 });
+  for (const v of [null, undefined, 'pas du json', '[1]', {}, { photos: -1 }, { videos: 1.5 }]) {
+    assert.strictEqual(R.normalizeFamilies(v), null);
+  }
+});
+
 console.log(`safebox/rules : ${ok} tests passés`);

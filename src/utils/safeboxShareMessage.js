@@ -8,12 +8,15 @@
  * ── Ce que le serveur décide ──
  *
  * Le client envoie `{"v":1,"share":<id>}` et, au besoin, une mini-image floue
- * (`b`, quelques Ko de base64). Le serveur relit le partage en base : il doit
- * appartenir à l'expéditeur ET à cette discussion. `content` est réécrit
- * (nom, taille, type, famille), `mediaUrl` vaut NULL (le fichier ne passe
- * jamais par les médias de discussion) et `mediaName` porte un repli lisible
- * pour les applications qui ne connaissent pas le type 11 : elles affichent
- * « 📦 Mariage.mp4 · 840 Mo » au lieu de rien.
+ * (`b`, quelques Ko de base64) — pour un lot (lot 9), jusqu'à quatre (`bs`,
+ * la mosaïque). Le serveur relit le partage en base : il doit appartenir à
+ * l'expéditeur ET à cette discussion. `content` est réécrit (nom, taille,
+ * type, famille ; pour un lot, `kind`, `count` et `families` en plus),
+ * `mediaUrl` vaut NULL (le fichier ne passe jamais par les médias de
+ * discussion) et `mediaName` porte un repli lisible pour les applications qui
+ * ne connaissent pas le type 11 : elles affichent « 📦 Mariage.mp4 · 840 Mo »
+ * au lieu de rien. Une ancienne application lit un lot comme un fichier :
+ * titre et taille totale, et « Mettez à jour Alanya » au téléchargement.
  *
  * ── E2EE ──
  *
@@ -23,12 +26,15 @@
  */
 
 const pool = require('../config/db');
-const { normalizeMeta } = require('../services/safebox/rules');
+const { normalizeMeta, normalizeFamilies } = require('../services/safebox/rules');
 
 const SAFEBOX_SHARE_TYPE = 11;
 const SAFEBOX_SHARE_PREVIEW = '📦 Fichier';
 const PAYLOAD_VERSION = 1;
 const FLOU_MAX = 6000; // caractères de base64, ~4,5 Ko
+const MOSAIQUE_MAX = 4; // mini-images d'un lot
+const MOSAIQUE_FLOU_MAX = 3000; // par mini-image de la mosaïque
+const BASE64 = /^[A-Za-z0-9+/=]+$/;
 
 class SafeboxShareMessageError extends Error {
   constructor(code = 'SAFEBOX_SHARE_INVALID', status = 400, message = 'Partage du coffre invalide') {
@@ -51,15 +57,22 @@ function tailleLisible(octets) {
 
 function lirePayload(content) {
   // Le client renvoie aussi nom, type et détails (repris de toute façon en base).
-  if (typeof content !== 'string' || content.length > FLOU_MAX + 2000) return null;
+  if (typeof content !== 'string' || content.length > FLOU_MAX + MOSAIQUE_MAX * MOSAIQUE_FLOU_MAX + 2000) return null;
   try {
     const d = JSON.parse(content);
     if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
     if (!Number.isSafeInteger(d.share) || d.share <= 0) return null;
     // Une mini-image trop lourde refuse le message entier, pas seulement l'image.
     if (typeof d.b === 'string' && d.b.length > FLOU_MAX) return null;
-    const flou = typeof d.b === 'string' && d.b.length <= FLOU_MAX && /^[A-Za-z0-9+/=]+$/.test(d.b) ? d.b : null;
-    return { share: d.share, flou };
+    const flou = typeof d.b === 'string' && d.b.length <= FLOU_MAX && BASE64.test(d.b) ? d.b : null;
+    let mosaique = null;
+    if (d.bs != null) {
+      if (!Array.isArray(d.bs) || d.bs.length > MOSAIQUE_MAX) return null;
+      if (d.bs.some((x) => typeof x === 'string' && x.length > MOSAIQUE_FLOU_MAX)) return null;
+      // Une case sans image reste vide (chaîne vide) : la mosaïque garde son ordre.
+      mosaique = d.bs.map((x) => (typeof x === 'string' && BASE64.test(x) ? x : ''));
+    }
+    return { share: d.share, flou, mosaique };
   } catch {
     return null;
   }
@@ -99,7 +112,7 @@ async function resolveSafeboxShareFields({
   let s;
   try {
     [[s]] = await db.query(
-      `SELECT id, name, mime, family, plain_bytes FROM safebox_share
+      `SELECT * FROM safebox_share
         WHERE id = ? AND sender_id = ? AND conversation_id = ? AND revoked_at IS NULL`,
       [p.share, senderID, conversationID],
     );
@@ -108,7 +121,9 @@ async function resolveSafeboxShareFields({
     throw e;
   }
   if (!s) throw new SafeboxShareMessageError();
-  const meta = await metaDuPartage(db, s.id);
+  const lot = s.kind === 'batch';
+  const meta = lot ? null : await metaDuPartage(db, s.id);
+  const familles = lot ? normalizeFamilies(s.families) : null;
   const canonique = {
     v: PAYLOAD_VERSION,
     share: Number(s.id),
@@ -116,13 +131,17 @@ async function resolveSafeboxShareFields({
     size: Number(s.plain_bytes),
     mime: s.mime,
     family: s.family,
+    ...(lot ? { kind: 'batch', count: Number(s.item_count), ...(familles ? { families: familles } : {}) } : {}),
     ...(meta ? { meta } : {}),
     ...(p.flou ? { b: p.flou } : {}),
+    ...(lot && p.mosaique?.some(Boolean) ? { bs: p.mosaique } : {}),
   };
   return {
     content: JSON.stringify(canonique),
     mediaUrl: null,
-    mediaName: `📦 ${s.name} · ${tailleLisible(s.plain_bytes)}`,
+    mediaName: lot
+      ? `📦 ${s.name} (${Number(s.item_count)}) · ${tailleLisible(s.plain_bytes)}`
+      : `📦 ${s.name} · ${tailleLisible(s.plain_bytes)}`,
   };
 }
 

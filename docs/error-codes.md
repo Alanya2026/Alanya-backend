@@ -240,8 +240,10 @@ L'application les traduira au lot 2 ; d'ici là, le repli lié au statut s'appli
 | `SAFEBOX_INVALID_BLOCKS` | 400 | Numéros de blocs invalides (`blockCount`, `maxPerCall` joints) |
 | `SAFEBOX_INVALID_KEY` | 400 | Clé du fichier absente ou pas de 32 octets |
 | `SAFEBOX_UPLOAD_INCOMPLETE` | 409 | Des blocs manquent chez MEGA (`missing`, `missingCount`, `previewMissing` joints) : les renvoyer puis terminer |
-| `SAFEBOX_SHARE_INVALID` | 400 | Message de type 11 dont le partage n'est pas à l'expéditeur ou pas à cette discussion (aussi sur `message:send_failed`) |
-| `SAFEBOX_SHARE_REVOKED` | 410 | L'expéditeur a mis le fichier partagé à la corbeille ou l'a supprimé : la carte affiche « Fichier retiré par l'expéditeur » |
+| `SAFEBOX_SHARE_INVALID` | 400 | Message de type 11 dont le partage n'est pas à l'expéditeur ou pas à cette discussion (aussi sur `message:send_failed`) ; partage d'un album vide ou d'une liste de fichiers invalide |
+| `SAFEBOX_SHARE_TOO_MANY` | 400 | Plus de 500 fichiers dans un même partage (`max` joint) : envoyer en plusieurs fois |
+| `SAFEBOX_SHARE_ITEM_REQUIRED` | 400 | Téléchargement d'un lot (album, sélection) sans l'élément `?item=` — réponse des anciennes applications : « Mettez à jour Alanya » |
+| `SAFEBOX_SHARE_REVOKED` | 410 | L'expéditeur a mis le fichier partagé à la corbeille, l'a supprimé ou a retiré le partage : la carte affiche « Fichier retiré par l'expéditeur » |
 | `SAFEBOX_DOWNLOAD_LIMIT` | 429 | Trop de téléchargements de ce fichier partagé sur 24 h (`limit` joint) ; l'expéditeur n'est jamais limité |
 | `SAFEBOX_NOTE_TOO_LONG` | 400 | Commentaire d'une photo trop long : `maxChars` (200) pour le texte, `maxDurationMs` (5 minutes) pour l'audio |
 | `SAFEBOX_NOTE_UNAVAILABLE` | 400 | Les commentaires sont réservés aux photos (famille « albums ») |
@@ -329,7 +331,7 @@ correctif — un code non traduit ne fait rien afficher de brut.
 - `SAFEBOX_INVALID_CIPHER` · `SAFEBOX_INVALID_KEY` · `SAFEBOX_INVALID_MOVE`
 - `SAFEBOX_INVALID_NAME` · `SAFEBOX_INVALID_NOTE` · `SAFEBOX_INVALID_SIZE` · `SAFEBOX_NAME_TAKEN`
 - `SAFEBOX_NOT_FOUND` · `SAFEBOX_NOTE_TOO_LONG` · `SAFEBOX_NOTE_UNAVAILABLE` · `SAFEBOX_QUOTA_EXCEEDED` · `SAFEBOX_ROOT_LOCKED`
-- `SAFEBOX_SHARE_INVALID` · `SAFEBOX_SHARE_REVOKED` · `SAFEBOX_TOO_DEEP`
+- `SAFEBOX_SHARE_INVALID` · `SAFEBOX_SHARE_ITEM_REQUIRED` · `SAFEBOX_SHARE_REVOKED` · `SAFEBOX_SHARE_TOO_MANY` · `SAFEBOX_TOO_DEEP`
 - `SAFEBOX_UNAVAILABLE` · `SAFEBOX_UPLOAD_INCOMPLETE` · `SAFEBOX_WRONG_FAMILY`
 - `SCAN_SECRET_REQUIRED` · `SEARCH_QUERY_REQUIRED` · `SENDER_ID_REQUIRED`
 - `SERVER_ERROR` · `SERVICE_UNAVAILABLE` · `SESSION_ALREADY_HANDLED`

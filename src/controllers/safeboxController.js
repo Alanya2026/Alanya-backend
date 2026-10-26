@@ -52,8 +52,12 @@ exports.restoreFile = route('restoreFile', (s, req) => s.restoreFile(moi(req), r
 exports.downloadFile = route('downloadFile', (s, req) => s.downloadFile(moi(req), req.params.id));
 exports.createShare = route('createShare', (s, req) => s.createShare(moi(req), req.body), 201);
 exports.shareInfo = route('shareInfo', (s, req) => s.shareInfo(moi(req), req.params.id));
-exports.shareDownload = route('shareDownload', (s, req) => s.shareDownload(moi(req), req.params.id));
+exports.shareItems = route('shareItems', (s, req) => s.shareItems(moi(req), req.params.id, { cursor: req.query.cursor }));
+exports.shareDownload = route('shareDownload', (s, req) => s.shareDownload(moi(req), req.params.id, { item: req.query.item }));
 exports.saveShare = route('saveShare', (s, req) => s.saveShare(moi(req), req.params.id, req.body), 201);
+exports.receivedShares = route('receivedShares', (s, req) => s.receivedShares(moi(req), { cursor: req.query.cursor }));
+exports.shareRecipients = route('shareRecipients', (s, req) => s.shareRecipients(moi(req), req.params.id));
+exports.revokeShare = route('revokeShare', (s, req) => s.revokeShare(moi(req), req.params.id));
 exports.largestFiles = route('largestFiles', (s, req) => s.largestFiles(moi(req), { limit: req.query.limit }));
 
 exports.reserveUpload = route('reserveUpload', (s, req) => s.reserveUpload(moi(req), req.body), 201);

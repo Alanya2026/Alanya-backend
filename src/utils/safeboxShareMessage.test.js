@@ -13,15 +13,25 @@ let ok = 0;
 const etapes = [];
 const test = (nom, fn) => etapes.push([nom, fn]);
 
-/** Faux pool : un seul partage, n° 7, de l'inscrit 3 dans la discussion 50. */
+/**
+ * Faux pool : le partage n° 7 (un fichier) et le n° 9 (un lot, lot 9), de
+ * l'inscrit 3 dans la discussion 50.
+ */
 const fauxDb = {
   async query(sql, [id, sender, conv]) {
     // Détails relevés au dépôt (migration 104), lus par le fichier du partage.
     if (sql.includes('b.meta')) {
       return id === 7 ? [[{ meta: '{"durationMs":767000,"width":1920,"height":1080,"pirate":"x"}' }]] : [[]];
     }
-    if (id === 7 && sender === 3 && conv === 50) {
-      return [[{ id: 7, name: 'Mariage.mp4', mime: 'video/mp4', family: 'videos', plain_bytes: 880803840 }]];
+    if (sender !== 3 || conv !== 50) return [[]];
+    if (id === 7) {
+      return [[{ id: 7, kind: 'file', name: 'Mariage.mp4', mime: 'video/mp4', family: 'videos', plain_bytes: 880803840, item_count: 1 }]];
+    }
+    if (id === 9) {
+      return [[{
+        id: 9, kind: 'batch', name: 'Kribi 2026', mime: null, family: 'photos', plain_bytes: 195035136,
+        item_count: 42, families: '{"photos":35,"videos":6,"documents":1,"pirate":2}',
+      }]];
     }
     return [[]];
   },
@@ -63,6 +73,23 @@ test('partage d\'un autre inscrit, d\'une autre discussion ou inconnu : refusé'
   ]) {
     await assert.rejects(resoudre(champs), (e) => e instanceof M.SafeboxShareMessageError && e.code === 'SAFEBOX_SHARE_INVALID' && e.status === 400);
   }
+});
+
+test('lot : titre, nombre, types et mosaïque ; repli lisible avec le nombre', async () => {
+  const b = Buffer.alloc(300, 1).toString('base64');
+  const r = await resoudre({ content: JSON.stringify({ v: 1, share: 9, b, bs: [b, '', '<x>', b] }) });
+  assert.deepStrictEqual(JSON.parse(r.content), {
+    v: 1, share: 9, name: 'Kribi 2026', size: 195035136, mime: null, family: 'photos',
+    kind: 'batch', count: 42, families: { photos: 35, videos: 6, documents: 1 }, b, bs: [b, '', '', b],
+  });
+  assert.strictEqual(r.mediaName, '📦 Kribi 2026 (42) · 186 Mo');
+  // Pas de mosaïque utile : rien dans le message.
+  assert.ok(!('bs' in JSON.parse((await resoudre({ content: JSON.stringify({ v: 1, share: 9, bs: ['', 7] }) })).content)));
+  // Une mosaïque trop longue ou trop lourde refuse le message entier.
+  await assert.rejects(resoudre({ content: JSON.stringify({ v: 1, share: 9, bs: [b, b, b, b, b] }) }), /invalide/);
+  await assert.rejects(resoudre({ content: JSON.stringify({ v: 1, share: 9, bs: ['A'.repeat(3001)] }) }), /invalide/);
+  // Un fichier seul ne porte jamais de mosaïque.
+  assert.ok(!('bs' in JSON.parse((await resoudre({ content: JSON.stringify({ v: 1, share: 7, bs: [b] }) })).content)));
 });
 
 test('conversation chiffrée : rien n\'est gardé en clair', async () => {

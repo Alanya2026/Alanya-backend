@@ -15,6 +15,7 @@ const {
   NOTE_TEXT_MAX,
   NOTE_AUDIO_MAX_MS,
   NOTE_AUDIO_MAX_BYTES,
+  SHARE_MAX_ITEMS,
 } = require('../../constants/safebox');
 const { SafeboxError } = require('./errors');
 
@@ -338,6 +339,60 @@ function validateNoteAudio(body) {
   return { size, plainSize, durationMs: Math.min(durationMs, NOTE_AUDIO_MAX_MS) };
 }
 
+/**
+ * Fichiers d'un partage en lot (lot 9) : identifiants distincts, dans l'ordre
+ * reçu, de 1 à SHARE_MAX_ITEMS.
+ */
+function shareFileIds(raw) {
+  const ids = Array.isArray(raw) ? [...new Set(raw.map(parseId))] : [];
+  if (!ids.length || ids.some((id) => !id)) {
+    throw new SafeboxError('SAFEBOX_SHARE_INVALID', 400, 'Fichiers à partager invalides');
+  }
+  if (ids.length > SHARE_MAX_ITEMS) {
+    throw new SafeboxError('SAFEBOX_SHARE_TOO_MANY', 400, `${SHARE_MAX_ITEMS} fichiers au plus par partage`, {
+      max: SHARE_MAX_ITEMS,
+    });
+  }
+  return ids;
+}
+
+/**
+ * Ce que la carte d'un lot affiche : nombre d'éléments par type, type le plus
+ * nombreux (le premier dans l'ordre des types en cas d'égalité), taille totale.
+ */
+function batchSummary(files) {
+  const families = {};
+  let plainBytes = 0;
+  for (const f of files) {
+    families[f.family] = (families[f.family] || 0) + 1;
+    plainBytes += Number(f.plain_bytes) || 0;
+  }
+  let family = FAMILIES[0];
+  for (const fam of FAMILIES) {
+    if ((families[fam] || 0) > (families[family] || 0)) family = fam;
+  }
+  return { families, family, plainBytes, count: files.length };
+}
+
+/** `families` relu en base (JSON) : seulement des types connus et des entiers positifs. */
+function normalizeFamilies(raw) {
+  let d = raw;
+  if (typeof d === 'string') {
+    try {
+      d = JSON.parse(d);
+    } catch {
+      return null;
+    }
+  }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  const out = {};
+  for (const fam of FAMILIES) {
+    const n = Number(d[fam]);
+    if (Number.isSafeInteger(n) && n > 0) out[fam] = n;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /** Vrai si l'espace suffit pour `ajout` octets de plus. */
 function fitsQuota({ usedBytes, quotaBytes, addBytes }) {
   return usedBytes + addBytes <= quotaBytes;
@@ -364,6 +419,9 @@ module.exports = {
   parseId,
   decodeFileKey,
   fitsQuota,
+  shareFileIds,
+  batchSummary,
+  normalizeFamilies,
   normalizeMeta,
   qualityCode,
   qualityName,
