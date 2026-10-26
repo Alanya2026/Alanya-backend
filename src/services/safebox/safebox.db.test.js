@@ -250,6 +250,7 @@ test('envoi : famille, espace réservé, blocs manquants, fin, clé', async () =
   assert.strictEqual(fichier.family, 'videos');
   assert.strictEqual(fichier.key, cle.toString('base64'));
   assert.strictEqual(fichier.originalBytes, 60 * Mio);
+  assert.strictEqual(fichier.quality, 'hd', 'un ancien client ne dit que « compressed » : lu comme HD');
   assert.ok(fichier.previewUrl.endsWith('/apercu'));
   await refuse(svc.uploadUrls(A, video.fileId, { blocks: [1] }), 'SAFEBOX_NOT_FOUND');
 
@@ -431,6 +432,16 @@ test('six dossiers (24/10/2026) : types acceptés, un contenu à plusieurs endro
   assert.strictEqual(zip.family, 'documents');
   const clip = await deposerFichier(M, racines.albums, 'danse.mp4', 20);
   assert.strictEqual(clip.family, 'videos');
+  assert.strictEqual(clip.quality, 'original');
+  // Format choisi au dépôt (24/10/2026), et sa copie dans un album le garde.
+  const r480 = await svc.reserveUpload(M, {
+    folderId: racines.videos, name: 'fete.mp4', size: 15, plainSize: 15, cipherFormat: 'SBX1',
+    quality: 'compressed', compressed: true, meta: { durationMs: 4000, codec: 'hevc' },
+  });
+  deposer(r480);
+  const fete = await svc.completeUpload(M, r480.fileId, { key: cle.toString('base64') });
+  assert.strictEqual(fete.quality, 'compressed');
+  assert.strictEqual(fete.meta.codec, 'hevc');
 
   const photo = await deposerFichier(M, racines.photos, 'Plage.jpg', 30);
   const avant = await svc.usageOf(M);
@@ -439,6 +450,8 @@ test('six dossiers (24/10/2026) : types acceptés, un contenu à plusieurs endro
   assert.notStrictEqual(copie.id, photo.id);
   assert.strictEqual(copie.folderId, kribi.id);
   assert.strictEqual(copie.family, 'photos');
+  const { files: [feteAlbum] } = await svc.addToFolder(M, kribi.id, { fileIds: [fete.id] });
+  assert.strictEqual(feteAlbum.quality, 'compressed');
   assert.deepStrictEqual(copie.alsoIn, [{ fileId: photo.id, folderId: racines.photos, root: 'photos', folderName: null }]);
   // Pas de copie chez MEGA, pas de place en plus.
   assert.deepStrictEqual(await svc.usageOf(M), avant);

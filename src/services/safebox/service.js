@@ -432,6 +432,9 @@ function createSafeboxService({
       storedBytes: taille(f),
       originalBytes: f.original_bytes == null ? null : Number(f.original_bytes),
       compressed: Boolean(f.compressed),
+      // Original, HD ou Compressé (décision du 24/10/2026), gardé dans la
+      // colonne `compressed` : voir R.qualityCode.
+      quality: R.qualityName(f.compressed),
       cipherFormat: f.cipher_format,
       meta: f.meta,
       // Contenu introuvable chez MEGA au dernier rapprochement (migration 106).
@@ -807,7 +810,7 @@ function createSafeboxService({
           const [r] = await conn.query(
             `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [alanyaID, album.id, blob, s.name, s.ext, s.mime, s.family, s.original_bytes, s.compressed ? 1 : 0],
+            [alanyaID, album.id, blob, s.name, s.ext, s.mime, s.family, s.original_bytes, Number(s.compressed)],
           );
           presents.set(blob, r.insertId);
         }
@@ -1080,7 +1083,7 @@ function createSafeboxService({
       const [f] = await conn.query(
         `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [alanyaID, dossier.id, b.insertId, nom, ext, mime, famille, tailles.originalSize, body.compressed ? 1 : 0],
+        [alanyaID, dossier.id, b.insertId, nom, ext, mime, famille, tailles.originalSize, R.qualityCode(body)],
       );
       return {
         fileId: f.insertId,
@@ -1504,7 +1507,7 @@ function createSafeboxService({
         `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [alanyaID, dossier.id, fichier.blob_id, fichier.name, fichier.ext, fichier.mime, fichier.family,
-          fichier.original_bytes, fichier.compressed ? 1 : 0],
+          fichier.original_bytes, Number(fichier.compressed)],
       );
       return r.insertId;
     });

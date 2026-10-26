@@ -274,7 +274,29 @@ function normalizeMeta(raw) {
     const t = texte(src[k]);
     if (t) out[k] = t;
   }
+  // Format d'une vidéo : l'application prévient avant d'envoyer du H.265 à
+  // qui ne le lit pas (décision du 24/10/2026).
+  if (src.codec === 'avc' || src.codec === 'hevc') out.codec = src.codec;
   return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Format choisi au dépôt (décision du 24/10/2026), rangé dans la colonne
+ * `compressed` (TINYINT) sans migration : 0 Original, 2 HD, 3 Compressé. Le
+ * 1 des dépôts antérieurs (« compressé », 720p) se lit comme HD. Sans
+ * `quality`, un ancien client ne dit que `compressed`.
+ */
+const QUALITES = Object.freeze({ original: 0, hd: 2, compressed: 3 });
+
+function qualityCode(body = {}) {
+  if (Object.prototype.hasOwnProperty.call(QUALITES, body.quality)) return QUALITES[body.quality];
+  return body.compressed ? 1 : 0;
+}
+
+function qualityName(code) {
+  const n = Number(code) || 0;
+  if (n === 3) return 'compressed';
+  return n === 0 ? 'original' : 'hd';
 }
 
 /**
@@ -343,6 +365,8 @@ module.exports = {
   decodeFileKey,
   fitsQuota,
   normalizeMeta,
+  qualityCode,
+  qualityName,
   normalizeNoteText,
   validateNoteAudio,
 };

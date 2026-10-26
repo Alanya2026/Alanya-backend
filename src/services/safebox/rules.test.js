@@ -197,6 +197,17 @@ test('espace : la réservation doit tenir', () => {
   assert.ok(!R.fitsQuota({ usedBytes: 9 * Gio, quotaBytes: 10 * Gio, addBytes: Gio + 1 }));
 });
 
+test('format choisi (24/10/2026) : Original, HD, Compressé dans la colonne compressed', () => {
+  assert.strictEqual(R.qualityCode({ quality: 'original' }), 0);
+  assert.strictEqual(R.qualityCode({ quality: 'hd' }), 2);
+  assert.strictEqual(R.qualityCode({ quality: 'compressed' }), 3);
+  // Ancien client : seulement compressed.
+  assert.strictEqual(R.qualityCode({ compressed: true }), 1);
+  assert.strictEqual(R.qualityCode({}), 0);
+  assert.strictEqual(R.qualityCode({ quality: 'toString' }), 0, 'pas une clé héritée');
+  assert.deepStrictEqual([0, 1, 2, 3, null].map(R.qualityName), ['original', 'hd', 'hd', 'compressed', 'original']);
+});
+
 test('détails de la carte : seulement ce qui est attendu, dans les bornes', () => {
   assert.deepStrictEqual(
     R.normalizeMeta({ durationMs: 767000, width: 1920, height: 1080, pages: 4, title: '  Ma\u0007   chanson ', artist: 'X', autre: 1 }),
@@ -208,6 +219,9 @@ test('détails de la carte : seulement ce qui est attendu, dans les bornes', () 
   assert.strictEqual(R.normalizeMeta({ durationMs: 8 * 86_400_000 }), null);
   assert.strictEqual([...R.normalizeMeta({ title: 'é'.repeat(300) }).title].length, 120);
   for (const v of [null, undefined, 'pas du json', '[1]', [1], 3]) assert.strictEqual(R.normalizeMeta(v), null);
+  // Format d'une vidéo (24/10/2026) : seulement H.264 ou H.265.
+  assert.deepStrictEqual(R.normalizeMeta({ durationMs: 1000, codec: 'hevc' }), { durationMs: 1000, codec: 'hevc' });
+  assert.strictEqual(R.normalizeMeta({ codec: 'vp9' }), null);
 });
 
 test('commentaire d\'une photo : 200 caractères, 5 minutes', () => {
