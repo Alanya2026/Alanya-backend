@@ -82,7 +82,7 @@ const getMyMedia = async (req, res) => {
     // (audit scalabilité 06/08/2026 §2.2, migration 060) — le WHERE ci-dessous
     // restreint déjà m.type à {1,2}, donc le CASE WHEN d'origine était
     // redondant ; le LEFT JOIN suffit.
-    const [rows] = await pool.query(
+    const lire = (filtreSensible) => pool.query(
       `SELECT m.msgID, m.conversationID, m.senderID, m.type, m.mediaUrl,
               m.mediaName, m.mediaDuration, m.mediaSize, m.sendAt,
               u.pseudo AS senderPseudo, u.nom AS senderNom,
@@ -106,16 +106,28 @@ const getMyMedia = async (req, res) => {
                AND m.sendAt >= b.dateBlock
           )
           AND (m.isViewOnce = 0 OR m.senderID = ?)
-          -- Document sensible (migration 110) : il ne s'ouvre que dans la
-          -- visionneuse protégée, jamais dans une galerie — pas même chez
-          -- l'expéditeur, dont la galerie ouvrirait la visionneuse ordinaire.
-          AND m.isSensitive = 0
+          ${filtreSensible}
           ${ownerClause}
           ${cursorClause}
         ORDER BY ${orderBy}
         LIMIT ?`,
       params,
     );
+    // Document sensible (migration 110) : il ne s'ouvre que dans la
+    // visionneuse protégée, jamais dans une galerie — pas même chez
+    // l'expéditeur, dont la galerie ouvrirait la visionneuse ordinaire.
+    //
+    // Sans la colonne (code déployé avant la migration : un push sur main
+    // part en production sans l'appliquer), la requête est rejouée sans le
+    // filtre. C'est exact : sans colonne, aucun message sensible n'a pu être
+    // écrit (l'INSERT d'un message sensible la nomme).
+    let rows;
+    try {
+      [rows] = await lire('AND m.isSensitive = 0');
+    } catch (e) {
+      if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
+      [rows] = await lire('');
+    }
 
     const hasMore = rows.length > limit;
     const slice = hasMore ? rows.slice(0, limit) : rows;

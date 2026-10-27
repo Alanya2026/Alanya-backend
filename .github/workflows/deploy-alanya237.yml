@@ -50,6 +50,7 @@ jobs:
           npm run test:media
           npm run test:e2ee
           npm run test:stickers
+          npm run test:sensible
 
   deploy:
     needs: tests

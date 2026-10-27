@@ -31,7 +31,7 @@ const ordre = (src, a, b) => src.indexOf(a) < src.indexOf(b) && src.indexOf(a) !
 assert.ok(ordre(socketSrc, 'resolveSendPolicy(', 'resolveStickerFields('), 'socket : politique avant sticker');
 assert.ok(ordre(socketSrc, 'resolveStickerFields(', 'messageInsertParams({'), 'socket : sticker avant INSERT');
 assert.ok(ordre(httpSrc, 'evaluateDirectMessageSend(conversationID', 'resolveStickerFields('), 'http : politique avant sticker');
-assert.ok(ordre(httpSrc, 'resolveStickerFields(', 'messageInsertSql(chiffre)'), 'http : sticker avant INSERT');
+assert.ok(ordre(httpSrc, 'resolveStickerFields(', 'messageInsertSql(chiffre'), 'http : sticker avant INSERT');
 // Le chemin HTTP rend le feature du refus Plus ; le socket aussi (toSocketError)
 assert.ok(/feature: error\.feature/.test(httpSrc), 'http : feature dans la réponse');
 assert.ok(socketSrc.includes('toSocketError(e)'), 'socket : feature dans send_failed');

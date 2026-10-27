@@ -43,7 +43,7 @@
         "smoke:openrouter": "node scripts/dev/openrouter-smoke.js",
         "smoke:b2": "node scripts/dev/b2-smoke.js",
         "smoke:mega-s4": "node --network-family-autoselection-attempt-timeout=5000 scripts/dev/mega-s4-smoke.js",
-        "test:sensible": "NODE_ENV=test node src/utils/documentSensible.test.js && NODE_ENV=test node src/controllers/documentSensibleRoutes.test.js && NODE_ENV=test node src/utils/messageInsert.test.js && NODE_ENV=test node src/utils/sentMessagePayload.test.js",
+        "test:sensible": "NODE_ENV=test node src/utils/documentSensible.test.js && NODE_ENV=test node src/controllers/profileMediaSensible.test.js && NODE_ENV=test node src/controllers/documentSensibleRoutes.test.js && NODE_ENV=test node src/utils/messageInsert.test.js && NODE_ENV=test node src/utils/sentMessagePayload.test.js",
         "test:safebox": "NODE_ENV=test node src/services/safebox/rules.test.js && NODE_ENV=test node src/services/safebox/service.test.js && NODE_ENV=test node src/services/safebox/keys.test.js && NODE_ENV=test node src/services/safebox/storage.test.js && NODE_ENV=test node src/controllers/safeboxController.test.js && NODE_ENV=test node src/services/safebox/plusSpace.test.js && NODE_ENV=test node src/utils/safeboxShareMessage.test.js && NODE_ENV=test node src/controllers/admin/safebox.test.js && NODE_ENV=test node src/services/safebox/cipher.test.js && NODE_ENV=test node src/controllers/admin/safeboxModeration.test.js",
         "test:safebox:db": "NODE_ENV=test node src/services/safebox/safebox.db.test.js",
         "smoke:mega-s4:lot0": "node --network-family-autoselection-attempt-timeout=5000 scripts/dev/mega-s4-lot0.js",
