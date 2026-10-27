@@ -24,6 +24,8 @@ const MSG_SELECT_KEYS = [
   'replyToID', 'replyToContent', 'isStatusReply',
   'has_reactions', 'reactions', 'isForwarded', 'isPinned', 'pinnedAt', 'pinnedBy',
   'isViewOnce', 'viewedAt', 'mentions',
+  // Document sensible (migration 110).
+  'isSensitive', 'mediaProtection',
   'sender_nom', 'sender_pseudo', 'sender_avatar', 'messageTz', 'messageTzOffset',
   'sender_account_type', 'sender_verification_status',
   'clientId',
@@ -173,3 +175,14 @@ const badClick = buildSentPayload({
 assert.strictEqual(badClick.clickSentAt, null);
 
 console.log('sentMessagePayload.test.js OK');
+
+// ── Document sensible : drapeau 0/1, descripteur en objet (colonne JSON) ──
+assert.strictEqual(payload.isSensitive, 0, 'isSensitive omis doit valoir 0');
+assert.strictEqual(payload.mediaProtection, null);
+const sensible = buildSentPayload({
+  msgID: 1, isSensitive: true, mediaProtection: '{"sensible":true}',
+});
+assert.strictEqual(sensible.isSensitive, 1);
+assert.deepStrictEqual(sensible.mediaProtection, { sensible: true });
+
+console.log('sentMessagePayload sensible OK');

@@ -110,6 +110,17 @@ sont valides mais rendus par le repli lié au statut HTTP.
 | `MEDIA_EXPIRED` | 410 | Média purgé par rétention |
 | `INVALID_EXTENSION` | 400 | Type de fichier refusé |
 
+### Documents sensibles
+Plan : `PLAN-DOCUMENTS-SENSIBLES.md` (app). Un envoi sensible mal formé (`isSensitive` sur un message sans fichier, `mediaProtection` qui n'est pas un objet, de plus de 2 Ko, sans `isSensitive` ou dans un message chiffré) répond `400 INVALID_PAYLOAD`, aussi par `message:send_failed`.
+
+| Code | Statut | Sens |
+|---|---|---|
+| `SENSITIVE_NO_FORWARD` | 403 | Transfert d'un document sensible (`/api/messages/batch-forward`) : seule une copie signée sort, par « Enregistrer » |
+| `NOT_SENSITIVE` | 400 | Trace demandée pour un message qui n'est pas un document sensible |
+| `INVALID_FINGERPRINT` | 422 | Empreinte mal formée : il faut 32 caractères hexadécimaux (espaces et casse indifférents) |
+| `FINGERPRINT_NOT_FOUND` | 404 | Empreinte inconnue, ou copie d'un document que le demandeur ne pouvait pas voir (même réponse) |
+| `FINGERPRINT_EXISTS` | 409 | Empreinte déjà enregistrée : rejeu, ou tentative d'écraser la trace d'un autre |
+
 ### Abonnement
 | Code | Statut | Sens |
 |---|---|---|

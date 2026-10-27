@@ -34,6 +34,13 @@ function _int(v, fallback = null) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Objet tel que mysql2 rend une colonne JSON : parsé, ou `null`. */
+function _json(v) {
+  if (v == null) return null;
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch (_) { return null; }
+}
+
 function buildSentPayload({
   msgID,
   senderID,
@@ -57,6 +64,8 @@ function buildSentPayload({
   mentions,
   senderIdentity,
   encVersion,
+  isSensitive = false,
+  mediaProtection = null,
 }) {
   const id = clientId || null;
   return {
@@ -99,6 +108,11 @@ function buildSentPayload({
     isStatusReply: _int(isStatusReply, 0),
     isForwarded: isForwarded ? 1 : 0,
     isViewOnce: isViewOnce ? 1 : 0,
+    // Document sensible (migration 110). `mediaProtection` sous la forme
+    // qu'une colonne JSON prend dans mysql2 : l'objet, pas sa chaîne — le
+    // client reçoit la même chose qu'à la relecture de la ligne.
+    isSensitive: isSensitive ? 1 : 0,
+    mediaProtection: _json(mediaProtection),
 
     // Colonnes d'évolution, à leur valeur de création.
     isDeleted: 0,

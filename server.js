@@ -58,6 +58,7 @@ const reportRoutes       = require('./src/routes/reports');
 const e2eeKeysRoutes     = require('./src/routes/e2eeKeys');
 const stickerRoutes      = require('./src/routes/stickers');
 const safeboxRoutes      = require('./src/routes/safebox');
+const documentsSensiblesRoutes = require('./src/routes/documentsSensibles');
 const qrLandingRoutes    = require('./src/routes/qrLanding');
 const legalRoutes        = require('./src/routes/legal');
 const healthRoutes       = require('./src/routes/health');
@@ -223,6 +224,7 @@ app.use('/api/reports',       reportRoutes);
 app.use('/api/e2ee',          e2eeKeysRoutes);
 app.use('/api/stickers',      stickerRoutes);
 app.use('/api/safebox',       safeboxRoutes);
+app.use('/api/documents-sensibles', documentsSensiblesRoutes);
 app.use('/notify',            notifyRoutes);
 
 // Pages légales publiques (accueil, confidentialité, CGU, licences) —

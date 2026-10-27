@@ -106,6 +106,10 @@ const getMyMedia = async (req, res) => {
                AND m.sendAt >= b.dateBlock
           )
           AND (m.isViewOnce = 0 OR m.senderID = ?)
+          -- Document sensible (migration 110) : il ne s'ouvre que dans la
+          -- visionneuse protégée, jamais dans une galerie — pas même chez
+          -- l'expéditeur, dont la galerie ouvrirait la visionneuse ordinaire.
+          AND m.isSensitive = 0
           ${ownerClause}
           ${cursorClause}
         ORDER BY ${orderBy}

@@ -59,8 +59,33 @@ VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 ON DUPLICATE KEY UPDATE msgID = LAST_INSERT_ID(msgID)
 `;
 
-/** La forme d'INSERT qui convient : chiffrée seulement s'il y a un corps. */
-function messageInsertSql(chiffre) {
+/**
+ * ── Document sensible (migration 110) ──
+ *
+ * `isSensitive` et `mediaProtection` ne sont nommées QUE pour un message
+ * sensible, pour la même raison qu'`enc_version` : le chemin qui porte tout le
+ * trafic reste indépendant de l'ordre de déploiement. Elles s'insèrent après
+ * `mentions` (deux `?` de plus), avant le littéral `enc_version`.
+ */
+const COLONNES_SENSIBLE = ', isSensitive, mediaProtection';
+
+function _avecSensible(sql) {
+  return sql
+    .replace('isViewOnce, mentions', `isViewOnce, mentions${COLONNES_SENSIBLE}`)
+    .replace(/\?, \?, \?\)\nON DUPLICATE/, '?, ?, ?, ?, ?)\nON DUPLICATE')
+    .replace(/\?, \?, \?, 1\)\nON DUPLICATE/, '?, ?, ?, ?, ?, 1)\nON DUPLICATE');
+}
+
+const MESSAGE_INSERT_SENSIBLE_SQL = _avecSensible(MESSAGE_INSERT_SQL);
+const MESSAGE_INSERT_CHIFFRE_SENSIBLE_SQL = _avecSensible(MESSAGE_INSERT_CHIFFRE_SQL);
+
+/**
+ * La forme d'INSERT qui convient : chiffrée seulement s'il y a un corps,
+ * sensible seulement pour un document sensible. `sensible` doit être la même
+ * valeur que l'`isSensitive` passé à `messageInsertParams`.
+ */
+function messageInsertSql(chiffre, sensible = false) {
+  if (sensible) return chiffre ? MESSAGE_INSERT_CHIFFRE_SENSIBLE_SQL : MESSAGE_INSERT_SENSIBLE_SQL;
   return chiffre ? MESSAGE_INSERT_CHIFFRE_SQL : MESSAGE_INSERT_SQL;
 }
 
@@ -83,8 +108,10 @@ function messageInsertParams({
   isForwarded,
   isViewOnce,
   mentionsSerialized,
+  isSensitive = false,
+  mediaProtection = null,
 }) {
-  return [
+  const params = [
     senderID,
     conversationID,
     clientId ?? null,
@@ -105,6 +132,9 @@ function messageInsertParams({
     isViewOnce ? 1 : 0,
     mentionsSerialized,
   ];
+  // Seulement pour un message sensible : voir `messageInsertSql`.
+  if (isSensitive) params.push(1, mediaProtection ?? null);
+  return params;
 }
 
 /**
@@ -124,6 +154,8 @@ async function insertMessageThumb(conn, msgID, mediaThumb) {
 module.exports = {
   MESSAGE_INSERT_SQL,
   MESSAGE_INSERT_CHIFFRE_SQL,
+  MESSAGE_INSERT_SENSIBLE_SQL,
+  MESSAGE_INSERT_CHIFFRE_SENSIBLE_SQL,
   messageInsertSql,
   messageInsertParams,
   insertMessageThumb,

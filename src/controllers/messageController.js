@@ -28,6 +28,7 @@ const { MEDIA_THUMB_SELECT } = require('../utils/messageThumbSql');
 const { copyForForward } = require('../services/mediaStorage');
 const { resolveStickerFields, estSticker, sanitizeReplyContent, champsDeTransfert } = require('../utils/stickerMessage');
 const { normalizeMessageType } = require('../utils/messageType');
+const { normaliseSensible } = require('../utils/documentSensible');
 const { resolveSafeboxShareFields, sanitizeShareReply } = require('../utils/safeboxShareMessage');
 
 // Même origine que celle composée à l'upload : une URL de transfert doit être
@@ -252,6 +253,7 @@ const _persistMessage = async (conn, conversationID, senderID, fields) => {
     replyToID, replyToContent, isStatusReply = 0, isForwarded = 0, isViewOnce = 0,
     clickSentAt, clientId, mentions, mentionsAll = false,
     chiffre = null,
+    isSensitive = false, mediaProtection = null,
   } = fields;
 
   // `type` normalisé AVANT tout contrôle sticker : MySQL arrondit un `10.4` à
@@ -267,6 +269,10 @@ const _persistMessage = async (conn, conversationID, senderID, fields) => {
     throw err;
   }
   type = typeNormalise;
+
+  // Document sensible. Une `DocumentSensibleInvalide` porte `status` et
+  // `code` : le `catch` de `sendMessage` la rend telle quelle.
+  const sensible = normaliseSensible({ isSensitive, mediaProtection, type, chiffre });
 
   if (clientId) {
     const [existing] = await _execute(conn,
@@ -352,7 +358,7 @@ const _persistMessage = async (conn, conversationID, senderID, fields) => {
 
   const [result] = await _execute(
     conn,
-    messageInsertSql(chiffre),
+    messageInsertSql(chiffre, sensible.isSensitive),
     messageInsertParams({
       senderID,
       conversationID,
@@ -374,6 +380,8 @@ const _persistMessage = async (conn, conversationID, senderID, fields) => {
       isForwarded,
       isViewOnce,
       mentionsSerialized: serializeMentionsColumn(mentionsValue),
+      isSensitive: sensible.isSensitive,
+      mediaProtection: sensible.mediaProtection,
     }),
   );
 
@@ -503,7 +511,7 @@ const sendMessage = async (req, res, next) => {
       content, type = 0, mediaUrl, mediaName, mediaDuration,
       mediaSize, mediaPageCount,
       replyToID, replyToContent, isStatusReply = 0, isForwarded = 0, isViewOnce = 0,
-      clickSentAt, clientId,
+      clickSentAt, clientId, isSensitive, mediaProtection,
     } = req.body;
     const senderID = req.user.alanyaID;
 
@@ -537,7 +545,7 @@ const sendMessage = async (req, res, next) => {
       content, type, mediaUrl, mediaName, mediaDuration,
       mediaSize, mediaPageCount,
       replyToID, replyToContent, isStatusReply, isForwarded, isViewOnce,
-      clickSentAt, clientId, chiffre,
+      clickSentAt, clientId, chiffre, isSensitive, mediaProtection,
     });
 
     res.json(msg);
@@ -1275,6 +1283,11 @@ const batchForwardMessages = async (req, res) => {
       }
       if (m.isViewOnce) {
         return res.status(400).json({ error: 'Média à vue unique non transférable', code: 'INVALID_MEDIA' });
+      }
+      // Un document sensible ne se transfère pas : seule une copie signée
+      // sort, par « Enregistrer » (voir utils/documentSensible).
+      if (m.isSensitive) {
+        return res.status(403).json({ error: 'Document sensible non transférable', code: 'SENSITIVE_NO_FORWARD' });
       }
       // Un sticker n'a pas besoin d'URL source : `mediaUrl` est recalculée.
       if (m.type !== 0 && m.type !== 5 && !estSticker(m.type) && !m.mediaUrl) {

@@ -34,6 +34,10 @@ const {
 } = require('../../../utils/stickerMessage');
 const { normalizeMessageType } = require('../../../utils/messageType');
 const {
+  normaliseSensible,
+  DocumentSensibleInvalide,
+} = require('../../../utils/documentSensible');
+const {
   resolveSafeboxShareFields,
   SafeboxShareMessageError,
   sanitizeShareReply,
@@ -145,16 +149,16 @@ function emitSendFailed(socket, {
  * payer une transaction allongerait le chemin critique de l'accusé pour une
  * garantie dont il n'a pas l'usage.
  */
-async function insereMessage(params, chiffre) {
+async function insereMessage(params, chiffre, sensible = false) {
   if (!chiffre) {
-    const [r] = await pool.execute(messageInsertSql(null), params);
+    const [r] = await pool.execute(messageInsertSql(null, sensible), params);
     return { msgID: r.insertId, isNewInsert: r.affectedRows === 1 };
   }
 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const [r] = await conn.execute(messageInsertSql(chiffre), params);
+    const [r] = await conn.execute(messageInsertSql(chiffre, sensible), params);
     const msgID = r.insertId;
     await ecritChiffre(conn, msgID, chiffre);
     await conn.commit();
@@ -256,6 +260,7 @@ const messageSend = (io, socket) => {
         replyToID, replyToContent, isStatusReply = 0, isForwarded = 0, isViewOnce = 0,
         clickSentAt, mentions, mentionsAll = false,
       } = data;
+      let sensible;
       clientId = typeof data.clientId === 'string' ? data.clientId.trim() : '';
       const senderID = socket.alanyaID;
       logMsgPath(clientId || '?', 'received', t0);
@@ -304,6 +309,21 @@ const messageSend = (io, socket) => {
           code: 'E2EE_INACTIF',
           message: 'Chiffrement de bout en bout non disponible pour ce compte',
         });
+        return;
+      }
+
+      // Document sensible : drapeau lu, descripteur borné mais jamais lu.
+      // Refusé avant l'INSERT, comme un corps chiffré mal formé.
+      try {
+        sensible = normaliseSensible({
+          isSensitive: data.isSensitive,
+          mediaProtection: data.mediaProtection,
+          type,
+          chiffre,
+        });
+      } catch (e) {
+        if (!(e instanceof DocumentSensibleInvalide)) throw e;
+        emitSendFailed(socket, { clientId, code: e.code, message: e.message });
         return;
       }
 
@@ -438,12 +458,14 @@ const messageSend = (io, socket) => {
         isForwarded,
         isViewOnce,
         mentionsSerialized: serializeMentionsColumn(mentionsValue),
+        isSensitive: sensible.isSensitive,
+        mediaProtection: sensible.mediaProtection,
       });
 
       let msgID;
       let isNewInsert;
       try {
-        ({ msgID, isNewInsert } = await insereMessage(insertParams, chiffre));
+        ({ msgID, isNewInsert } = await insereMessage(insertParams, chiffre, sensible.isSensitive));
       } catch (e) {
         if (!estAppareilInconnu(e)) throw e;
         emitSendFailed(socket, {
@@ -513,6 +535,8 @@ const messageSend = (io, socket) => {
         mentions: mentionsValue,
         senderIdentity,
         encVersion: chiffre ? 1 : 0,
+        isSensitive: sensible.isSensitive,
+        mediaProtection: sensible.mediaProtection,
       });
 
       // Accusé expéditeur en premier : c'est lui qui fait passer la bulle de
