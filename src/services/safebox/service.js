@@ -1134,7 +1134,7 @@ function createSafeboxService({
         await db.query('UPDATE safebox_blob SET source_fp = ? WHERE id = ?',
           [sourceFingerprint(alanyaID, empreinte, env), blobId]);
       } catch (e) {
-        if (!sansMigration110(e)) throw e;
+        if (!sansMigration111(e)) throw e;
       }
     }
 
@@ -1356,9 +1356,9 @@ function createSafeboxService({
   // serveur la lie au compte (`sourceFingerprint`) et la garde sur le blob.
   // Avant d'envoyer, le téléphone demande ce que le coffre a déjà : rien n'est
   // renvoyé deux fois, et ce que l'inscrit a supprimé du coffre n'y revient
-  // pas (« ne plus sauvegarder », migration 110).
+  // pas (« ne plus sauvegarder », migration 111).
 
-  const sansMigration110 = (e) => e.code === 'ER_NO_SUCH_TABLE' || e.code === 'ER_BAD_FIELD_ERROR';
+  const sansMigration111 = (e) => e.code === 'ER_NO_SUCH_TABLE' || e.code === 'ER_BAD_FIELD_ERROR';
 
   /**
    * Ces contenus viennent de passer à la corbeille : ceux qui ne sont plus
@@ -1377,7 +1377,7 @@ function createSafeboxService({
         [alanyaID, ids, alanyaID],
       );
     } catch (e) {
-      if (!sansMigration110(e)) throw e;
+      if (!sansMigration111(e)) throw e;
     }
   }
 
@@ -1392,7 +1392,7 @@ function createSafeboxService({
         [alanyaID, ids],
       );
     } catch (e) {
-      if (!sansMigration110(e)) throw e;
+      if (!sansMigration111(e)) throw e;
     }
   }
 
@@ -1426,7 +1426,7 @@ function createSafeboxService({
         [alanyaID, empreintes],
       );
     } catch (e) {
-      if (sansMigration110(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
+      if (sansMigration111(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
       throw e;
     }
     const [sautes] = await db.query(
@@ -1479,7 +1479,7 @@ function createSafeboxService({
         [fps.map((fp) => [alanyaID, sourceFingerprint(alanyaID, fp, env)])],
       );
     } catch (e) {
-      if (sansMigration110(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
+      if (sansMigration111(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
       throw e;
     }
     return { ok: true, skipped: fps.length };

@@ -20,7 +20,7 @@
  *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
  *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
  *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
- *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers 109_safebox_partage_lots 110_safebox_sauvegarde_auto; do
+ *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers 109_safebox_partage_lots 111_safebox_sauvegarde_auto; do
  *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
@@ -855,7 +855,7 @@ test('lot 9 : retirer le partage, fichier supprimé dans un lot, modération d\'
   assert.strictEqual((await svc.usageOf(lot9.Mx)).usedBytes, 0, 'les copies gardées partent aussi');
 });
 
-// ── Lot 10 : sauvegarde automatique (migration 110) ───────────────────────
+// ── Lot 10 : sauvegarde automatique (migration 111) ───────────────────────
 
 test('sauvegarde automatique : doublons, ajout sans copie à Photos, « ne plus sauvegarder »', async () => {
   const P = await compte('sauvegarde');

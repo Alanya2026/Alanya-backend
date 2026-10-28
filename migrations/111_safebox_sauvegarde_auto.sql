@@ -15,6 +15,8 @@
 -- Réexécutable : colonne et index testés dans information_schema, CREATE
 -- TABLE IF NOT EXISTS. Ajouts seulement : l'appliquer AVANT de déployer le
 -- lot 10 (l'ancien code n'est pas gêné).
+--
+-- Numérotée 111 : la 110 est celle des documents sensibles (110_documents_sensibles.sql).
 
 SET @col := (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'safebox_blob' AND COLUMN_NAME = 'source_fp');
