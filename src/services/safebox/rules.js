@@ -16,6 +16,7 @@ const {
   NOTE_AUDIO_MAX_MS,
   NOTE_AUDIO_MAX_BYTES,
   SHARE_MAX_ITEMS,
+  BACKUP_CHECK_MAX,
 } = require('../../constants/safebox');
 const { SafeboxError } = require('./errors');
 
@@ -271,7 +272,9 @@ function normalizeMeta(raw) {
   }
   const pages = entier(src.pages, 100_000);
   if (pages) out.pages = pages;
-  for (const k of ['title', 'artist']) {
+  // `source` : le dossier du téléphone d'où vient le fichier (« Camera »,
+  // « WhatsApp Images »), pour filtrer Photos et Vidéos (lot 10).
+  for (const k of ['title', 'artist', 'source']) {
     const t = texte(src[k]);
     if (t) out[k] = t;
   }
@@ -393,6 +396,33 @@ function normalizeFamilies(raw) {
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * Empreinte de l'original envoyée par le téléphone (lot 10) : 64 caractères
+ * hexadécimaux, ou null si absente. Mal formée : refusée.
+ */
+function normalizeSourceFp(raw) {
+  if (raw == null || raw === '') return null;
+  const fp = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!/^[0-9a-f]{64}$/.test(fp)) {
+    throw new SafeboxError('SAFEBOX_INVALID_FINGERPRINT', 400, 'Empreinte de fichier invalide');
+  }
+  return fp;
+}
+
+/** Une liste d'empreintes à vérifier : distinctes, de 1 à BACKUP_CHECK_MAX. */
+function sourceFps(raw) {
+  const fps = Array.isArray(raw) ? [...new Set(raw.map(normalizeSourceFp))] : [];
+  if (!fps.length || fps.some((f) => !f)) {
+    throw new SafeboxError('SAFEBOX_INVALID_FINGERPRINT', 400, 'Empreintes de fichiers invalides');
+  }
+  if (fps.length > BACKUP_CHECK_MAX) {
+    throw new SafeboxError('SAFEBOX_INVALID_FINGERPRINT', 400, `${BACKUP_CHECK_MAX} empreintes au plus par demande`, {
+      max: BACKUP_CHECK_MAX,
+    });
+  }
+  return fps;
+}
+
 /** Vrai si l'espace suffit pour `ajout` octets de plus. */
 function fitsQuota({ usedBytes, quotaBytes, addBytes }) {
   return usedBytes + addBytes <= quotaBytes;
@@ -422,6 +452,8 @@ module.exports = {
   shareFileIds,
   batchSummary,
   normalizeFamilies,
+  normalizeSourceFp,
+  sourceFps,
   normalizeMeta,
   qualityCode,
   qualityName,

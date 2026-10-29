@@ -88,6 +88,9 @@ const SHARE_MAX_ITEMS = 500;
 /** Partages par page de l'onglet « Reçus ». */
 const RECEIVED_PAGE_SIZE = 30;
 
+/** Empreintes vérifiées en une demande par la sauvegarde automatique (lot 10). */
+const BACKUP_CHECK_MAX = 500;
+
 /**
  * Commentaire d'une photo (décision du 18/10/2026) : 200 caractères de texte,
  * 5 minutes d'audio. L'application enregistre en AAC mono ~64 kbit/s, soit
@@ -119,6 +122,7 @@ module.exports = {
   PAGE_SIZE,
   SHARE_MAX_ITEMS,
   RECEIVED_PAGE_SIZE,
+  BACKUP_CHECK_MAX,
   NOTE_TEXT_MAX,
   NOTE_AUDIO_MAX_MS,
   NOTE_AUDIO_MAX_BYTES,

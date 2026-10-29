@@ -222,6 +222,8 @@ test('détails de la carte : seulement ce qui est attendu, dans les bornes', () 
   // Format d'une vidéo (24/10/2026) : seulement H.264 ou H.265.
   assert.deepStrictEqual(R.normalizeMeta({ durationMs: 1000, codec: 'hevc' }), { durationMs: 1000, codec: 'hevc' });
   assert.strictEqual(R.normalizeMeta({ codec: 'vp9' }), null);
+  // Dossier d'origine sur le téléphone (lot 10).
+  assert.deepStrictEqual(R.normalizeMeta({ source: '  WhatsApp\u0007 Images ' }), { source: 'WhatsApp Images' });
 });
 
 test('commentaire d\'une photo : 200 caractères, 5 minutes', () => {
@@ -256,6 +258,17 @@ test('carte d\'un lot : nombre par type, type le plus nombreux, taille totale', 
   for (const v of [null, undefined, 'pas du json', '[1]', {}, { photos: -1 }, { videos: 1.5 }]) {
     assert.strictEqual(R.normalizeFamilies(v), null);
   }
+});
+
+test('empreinte de l\'original (lot 10) : 64 caractères hexadécimaux', () => {
+  const fp = 'AB'.repeat(32);
+  assert.strictEqual(R.normalizeSourceFp(fp), 'ab'.repeat(32), 'en minuscules');
+  for (const v of [null, undefined, '']) assert.strictEqual(R.normalizeSourceFp(v), null);
+  for (const v of ['ab', 'g'.repeat(64), 42, 'a'.repeat(65)]) refuse(() => R.normalizeSourceFp(v), 'SAFEBOX_INVALID_FINGERPRINT');
+  assert.deepStrictEqual(R.sourceFps([fp, fp.toLowerCase()]), ['ab'.repeat(32)], 'doublons retirés');
+  for (const v of [null, [], [''], 'x']) refuse(() => R.sourceFps(v), 'SAFEBOX_INVALID_FINGERPRINT');
+  const trop = Array.from({ length: 501 }, (_, i) => i.toString(16).padStart(64, '0'));
+  refuse(() => R.sourceFps(trop), 'SAFEBOX_INVALID_FINGERPRINT');
 });
 
 console.log(`safebox/rules : ${ok} tests passés`);

@@ -305,6 +305,27 @@ router.post('/shares/:id/revoke', auth, ecriture, c.revokeShare);
 
 /**
  * @swagger
+ * /api/safebox/backup/check:
+ *   post:
+ *     summary: "Sauvegarde automatique — { fps: [empreintes de l'original, 500 au plus], link? } → saved | elsewhere | uploading | skip | new"
+ *     description: >
+ *       Avec `link: true`, un contenu déjà ailleurs dans le coffre (un album, Partager) est ajouté sans copie
+ *       au dossier de son type. L'empreinte est liée au compte par le serveur.
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ * /api/safebox/backup/skip:
+ *   post:
+ *     summary: "« Ne plus sauvegarder » ces originaux — { fps }"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/backup/check', auth, ecriture, c.backupCheck);
+router.post('/backup/skip', auth, ecriture, c.backupSkip);
+
+/**
+ * @swagger
  * /api/safebox/trash:
  *   get:
  *     summary: Contenu de la corbeille, avec la date à laquelle chaque élément partira

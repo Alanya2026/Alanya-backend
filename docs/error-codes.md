@@ -252,6 +252,7 @@ L'application les traduira au lot 2 ; d'ici là, le repli lié au statut s'appli
 | `SAFEBOX_INVALID_KEY` | 400 | Clé du fichier absente ou pas de 32 octets |
 | `SAFEBOX_UPLOAD_INCOMPLETE` | 409 | Des blocs manquent chez MEGA (`missing`, `missingCount`, `previewMissing` joints) : les renvoyer puis terminer |
 | `SAFEBOX_SHARE_INVALID` | 400 | Message de type 11 dont le partage n'est pas à l'expéditeur ou pas à cette discussion (aussi sur `message:send_failed`) ; partage d'un album vide ou d'une liste de fichiers invalide |
+| `SAFEBOX_INVALID_FINGERPRINT` | 400 | Empreinte de l'original mal formée (64 caractères hexadécimaux), ou plus de 500 empreintes par demande (`max` joint) — sauvegarde automatique |
 | `SAFEBOX_SHARE_TOO_MANY` | 400 | Plus de 500 fichiers dans un même partage (`max` joint) : envoyer en plusieurs fois |
 | `SAFEBOX_SHARE_ITEM_REQUIRED` | 400 | Téléchargement d'un lot (album, sélection) sans l'élément `?item=` — réponse des anciennes applications : « Mettez à jour Alanya » |
 | `SAFEBOX_SHARE_REVOKED` | 410 | L'expéditeur a mis le fichier partagé à la corbeille, l'a supprimé ou a retiré le partage : la carte affiche « Fichier retiré par l'expéditeur » |
@@ -339,7 +340,7 @@ correctif — un code non traduit ne fait rien afficher de brut.
 - `REFRESH_INVALID` · `REFRESH_TOKEN_REQUIRED` · `REPORT_NOT_FOUND`
 - `RESERVED_BRAND_NAME` · `ROOM_ENDED` · `SAFEBOX_DOWNLOAD_LIMIT`
 - `SAFEBOX_FILE_LOST` · `SAFEBOX_FILE_TOO_LARGE` · `SAFEBOX_FOLDER_LIMIT` · `SAFEBOX_INVALID_BLOCKS`
-- `SAFEBOX_INVALID_CIPHER` · `SAFEBOX_INVALID_KEY` · `SAFEBOX_INVALID_MOVE`
+- `SAFEBOX_INVALID_CIPHER` · `SAFEBOX_INVALID_FINGERPRINT` · `SAFEBOX_INVALID_KEY` · `SAFEBOX_INVALID_MOVE`
 - `SAFEBOX_INVALID_NAME` · `SAFEBOX_INVALID_NOTE` · `SAFEBOX_INVALID_SIZE` · `SAFEBOX_NAME_TAKEN`
 - `SAFEBOX_NOT_FOUND` · `SAFEBOX_NOTE_TOO_LONG` · `SAFEBOX_NOTE_UNAVAILABLE` · `SAFEBOX_QUOTA_EXCEEDED` · `SAFEBOX_ROOT_LOCKED`
 - `SAFEBOX_SHARE_INVALID` · `SAFEBOX_SHARE_ITEM_REQUIRED` · `SAFEBOX_SHARE_REVOKED` · `SAFEBOX_SHARE_TOO_MANY` · `SAFEBOX_TOO_DEEP`

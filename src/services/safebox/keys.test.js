@@ -63,4 +63,13 @@ test('empreinte de compte : stable, opaque, propre à chaque compte', () => {
   assert.notStrictEqual(K.accountTag(17, autre), a);
 });
 
+test('empreinte d\'un original : liée au compte, stable, opaque (lot 10)', () => {
+  const fp = 'ab'.repeat(32);
+  const a = K.sourceFingerprint(17, fp, env);
+  assert.match(a, /^[0-9a-f]{64}$/);
+  assert.strictEqual(K.sourceFingerprint(17, fp, env), a);
+  assert.notStrictEqual(K.sourceFingerprint(18, fp, env), a, 'le même fichier chez un autre compte');
+  assert.notStrictEqual(a, fp, 'ne redit pas l\'empreinte du téléphone');
+});
+
 console.log(`safebox/keys : ${ok} tests passés`);
