@@ -45,6 +45,9 @@ const {
 //   ice_candidate { targetUserId, candidate }
 //   call_resume_ack    { callId }  — client confirme reprise après call_resume
 //   call_resume_reject { callId, reason? } — client idle sans session locale
+//   call_video_upgrade_offer { targetUserId, callId, transitionId, offer }
+//   call_video_upgrade_answer { targetUserId, callId, transitionId, answer }
+//   call_video_upgrade_commit { targetUserId, callId, transitionId }
 //
 // Serveur → Client :
 //   incoming_call { callId, callerId, callerName, callerPhoto, isVideo, offer }
@@ -3280,6 +3283,7 @@ const callRejoin = (io, socket, userSockets) => {
         offer,
         ...(data?.generation != null ? { generation: data.generation } : {}),
       };
+
       emitToDevice(io, targetID, targetDeviceId, 'call_rejoin_offer', payload);
     } catch (error) {
       console.error('[Socket call_rejoin]', error.message);
@@ -3335,6 +3339,122 @@ const callRejoin = (io, socket, userSockets) => {
   });
 };
 
+/**
+ * Renégociation vidéo sur un appel audio actif.
+ *
+ * Ce canal est volontairement distinct de call_rejoin : une reprise ICE ne
+ * doit pas changer le mode média ni accepter une offre provenant d'un appareil
+ * secondaire. Les deux côtés doivent être propriétaires de leur appel actif.
+ */
+const callVideoUpgrade = (io, socket) => {
+  const relay = (event, outgoingEvent, field) => {
+    socket.on(event, async (data) => {
+      try {
+        if (!socket.authenticated) return;
+        const targetID = toInt(data?.targetUserId);
+        const callId = data?.callId != null ? String(data.callId) : '';
+        const transitionId = data?.transitionId != null
+          ? String(data.transitionId)
+          : '';
+        const description = data?.[field];
+        if (
+          !targetID ||
+          !callId ||
+          transitionId.length < 8 ||
+          transitionId.length > 128 ||
+          !description ||
+          typeof description.sdp !== 'string' ||
+          description.sdp.length > 2_000_000 ||
+          (description.type !== 'offer' && description.type !== 'answer')
+        ) return;
+
+        const userID = socket.alanyaID;
+        const entry = await callState.getEntry(userID);
+        if (
+          !entry ||
+          entry.status !== 'in_call' ||
+          String(entry.callId) !== callId ||
+          Number(entry.peerId) !== targetID
+        ) {
+          socket.emit('call_failed', {
+            reason: 'Aucun appel vidéo actif correspondant',
+            code: 'CALL_VIDEO_UPGRADE_INVALID',
+            callId,
+          });
+          return;
+        }
+
+        const sourceDeviceId = normalizeDeviceId(socket.deviceId);
+        if (
+          !sourceDeviceId ||
+          !(await callDeviceOwnership.isOwnerDevice(callId, userID, sourceDeviceId))
+        ) return;
+
+        const targetDeviceId = await callDeviceOwnership.getActiveDeviceId(
+          callId,
+          targetID,
+        );
+        if (!targetDeviceId) return;
+
+        emitToDevice(io, targetID, targetDeviceId, outgoingEvent, {
+          callId,
+          peerId: String(userID),
+          transitionId,
+          [field]: description,
+        });
+      } catch (error) {
+        console.error(`[Socket ${event}]`, error.message);
+      }
+    });
+  };
+
+  relay('call_video_upgrade_offer', 'call_video_upgrade_offer', 'offer');
+  relay('call_video_upgrade_answer', 'call_video_upgrade_answer', 'answer');
+
+  socket.on('call_video_upgrade_commit', async (data) => {
+    try {
+      if (!socket.authenticated) return;
+      const targetID = toInt(data?.targetUserId);
+      const callId = data?.callId != null ? String(data.callId) : '';
+      const transitionId = data?.transitionId != null
+        ? String(data.transitionId)
+        : '';
+      if (
+        !targetID ||
+        !callId ||
+        transitionId.length < 8 ||
+        transitionId.length > 128
+      ) return;
+
+      const userID = socket.alanyaID;
+      const entry = await callState.getEntry(userID);
+      if (
+        !entry ||
+        entry.status !== 'in_call' ||
+        String(entry.callId) !== callId ||
+        Number(entry.peerId) !== targetID
+      ) return;
+      const sourceDeviceId = normalizeDeviceId(socket.deviceId);
+      if (
+        !sourceDeviceId ||
+        !(await callDeviceOwnership.isOwnerDevice(callId, userID, sourceDeviceId))
+      ) return;
+      const targetDeviceId = await callDeviceOwnership.getActiveDeviceId(
+        callId,
+        targetID,
+      );
+      if (!targetDeviceId) return;
+      emitToDevice(io, targetID, targetDeviceId, 'call_video_upgrade_commit', {
+        callId,
+        peerId: String(userID),
+        transitionId,
+      });
+    } catch (error) {
+      console.error('[Socket call_video_upgrade_commit]', error.message);
+    }
+  });
+};
+
 module.exports = {
   reclaimStaleBusy,
   offerCallResume,
@@ -3372,4 +3492,5 @@ module.exports = {
   groupVideoState,
   callResumeHandshake,
   callRejoin,
+  callVideoUpgrade,
 };
