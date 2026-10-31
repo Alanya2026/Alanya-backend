@@ -3520,6 +3520,7 @@ const callVideoUpgrade = (io, socket) => {
   };
 
   relayControl('call_video_upgrade_commit_ack', 'call_video_upgrade_commit_ack');
+  relayControl('call_video_upgrade_ack_request', 'call_video_upgrade_ack_request');
   relayControl('call_video_upgrade_cancel', 'call_video_upgrade_cancel');
 };
 

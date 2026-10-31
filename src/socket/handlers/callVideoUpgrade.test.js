@@ -138,6 +138,19 @@ async function main() {
   assert.strictEqual(io5.roomEmits[0].event, 'call_video_upgrade_commit_ack');
 
   await reset();
+  await setCall();
+  const io6 = fakeIo();
+  const requestOwner = fakeSocket(10, 'dev_10');
+  callVideoUpgrade(io6, requestOwner, userSockets);
+  await requestOwner.trigger('call_video_upgrade_ack_request', {
+    targetUserId: 77,
+    callId: '1329',
+    transitionId: 'transition-006',
+  });
+  assert.strictEqual(io6.roomEmits[0].room, deviceRoom(77, 'dev_77'));
+  assert.strictEqual(io6.roomEmits[0].event, 'call_video_upgrade_ack_request');
+
+  await reset();
   console.log('callVideoUpgrade.test.js OK');
 }
 
