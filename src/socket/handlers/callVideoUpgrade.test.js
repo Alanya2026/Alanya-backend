@@ -17,8 +17,8 @@ function fakeSocket(userId, deviceId) {
     on(event, handler) {
       handlers[event] = handler;
     },
-    async trigger(event, data) {
-      await handlers[event](data);
+    async trigger(event, data, acknowledge) {
+      await handlers[event](data, acknowledge);
     },
     emitted,
   };
@@ -103,6 +103,26 @@ async function main() {
   });
   assert.strictEqual(io3.roomEmits.length, 0, 'un callId périmé est rejeté');
   assert.strictEqual(stale.emitted[0].payload.code, 'CALL_VIDEO_UPGRADE_INVALID');
+
+  await reset();
+  await setCall();
+  const io4 = fakeIo();
+  const commitOwner = fakeSocket(10, 'dev_10');
+  callVideoUpgrade(io4, commitOwner, userSockets);
+  let commitAck;
+  await commitOwner.trigger(
+    'call_video_upgrade_commit',
+    {
+      targetUserId: 77,
+      callId: '1329',
+      transitionId: 'transition-004',
+    },
+    (payload) => {
+      commitAck = payload;
+    },
+  );
+  assert.deepStrictEqual(commitAck, { ok: true });
+  assert.strictEqual(io4.roomEmits[0].event, 'call_video_upgrade_commit');
 
   await reset();
   console.log('callVideoUpgrade.test.js OK');
