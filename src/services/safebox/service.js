@@ -346,6 +346,10 @@ function createSafeboxService({
   /**
    * Commentaires des photos (migration 107), pour leur propriétaire seulement :
    * texte, et audio prêt avec son adresse signée et sa clé.
+   *
+   * Un commentaire suit la photo, pas l'exemplaire (31/10/2026) : rangé sur
+   * un seul exemplaire (son porteur), il se montre sur tous ceux du même
+   * contenu dans le coffre — Photos et albums.
    */
   async function notesDe(storage, fileIds) {
     const ids = [...new Set(fileIds.map(Number).filter(Boolean))];
@@ -353,12 +357,22 @@ function createSafeboxService({
     if (!ids.length) return out;
     let rows;
     try {
-      [rows] = await db.query('SELECT * FROM safebox_note WHERE file_id IN (?)', [ids]);
+      [rows] = await db.query(
+        `SELECT f.id AS pour, n.*
+           FROM safebox_file f
+           JOIN safebox_file x ON x.alanyaID = f.alanyaID AND x.blob_id = f.blob_id
+           JOIN safebox_note n ON n.file_id = x.id
+          WHERE f.id IN (?)
+          ORDER BY f.id, x.trashed_at IS NULL DESC, n.updated_at DESC`,
+        [ids],
+      );
     } catch (e) {
       if (e.code === 'ER_NO_SUCH_TABLE') return out;
       throw e;
     }
-    for (const n of rows) out.set(Number(n.file_id), await noteShape(storage, n));
+    for (const n of rows) {
+      if (!out.has(Number(n.pour))) out.set(Number(n.pour), await noteShape(storage, n));
+    }
     return out;
   }
 
@@ -685,6 +699,7 @@ function createSafeboxService({
         [d.id, alanyaID],
       );
       await retenirSuppression(conn, alanyaID, jetes.map((x) => x.blob_id));
+      await relogerNotes(conn, alanyaID, jetes.map((x) => x.blob_id));
       await conn.query(
         'UPDATE safebox_folder SET trashed_at = NOW(), trashed_by_folder = NULL WHERE id = ?',
         [d.id],
@@ -742,6 +757,7 @@ function createSafeboxService({
         [d.id, alanyaID],
       );
       await oublierSuppression(conn, alanyaID, revenus.map((x) => x.blob_id));
+      await relogerNotes(conn, alanyaID, revenus.map((x) => x.blob_id));
       await conn.query('UPDATE safebox_folder SET trashed_at = NULL WHERE id = ?', [d.id]);
     });
     const [[f]] = await db.query(
@@ -817,6 +833,7 @@ function createSafeboxService({
         [f.id, alanyaID],
       );
     await retenirSuppression(db, alanyaID, [f.blob_id]);
+    await relogerNotes(db, alanyaID, [f.blob_id]);
     return { ok: true, trashed: r.affectedRows };
   }
 
@@ -842,6 +859,7 @@ function createSafeboxService({
       f.dossier_corbeille ? [racines[f.root].id, id, alanyaID] : [id, alanyaID],
     );
     await oublierSuppression(db, alanyaID, [f.blob_id]);
+    await relogerNotes(db, alanyaID, [f.blob_id]);
     return fileShape(await liveFile(db, alanyaID, id), storage);
   }
 
@@ -976,13 +994,67 @@ function createSafeboxService({
     return f;
   }
 
+  /**
+   * Le porteur du commentaire d'une photo : l'exemplaire du même contenu qui
+   * le range (un vivant d'abord), sinon cette photo elle-même.
+   */
+  async function porteur(conn, alanyaID, f) {
+    await relogerNotes(conn, alanyaID, [f.blob_id]);
+    const [[p]] = await conn.query(
+      `SELECT n.file_id FROM safebox_note n JOIN safebox_file x ON x.id = n.file_id
+        WHERE x.alanyaID = ? AND x.blob_id = ?
+        ORDER BY x.trashed_at IS NULL DESC, n.updated_at DESC LIMIT 1`,
+      [alanyaID, f.blob_id],
+    );
+    return p ? Number(p.file_id) : Number(f.id);
+  }
+
+  /**
+   * Après une corbeille ou une restauration : un commentaire porté par un
+   * exemplaire à la corbeille passe sur un exemplaire vivant du même contenu,
+   * s'il y en a un. Il ne part ainsi qu'avec le dernier exemplaire. La clé
+   * de son audio, liée à l'exemplaire, est rechiffrée pour le nouveau.
+   */
+  async function relogerNotes(conn, alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    if (!ids.length) return;
+    let jetees;
+    try {
+      [jetees] = await conn.query(
+        `SELECT n.file_id, n.audio_wrapped_key, f.blob_id
+           FROM safebox_note n JOIN safebox_file f ON f.id = n.file_id
+          WHERE f.alanyaID = ? AND f.blob_id IN (?) AND f.trashed_at IS NOT NULL`,
+        [alanyaID, ids],
+      );
+    } catch (e) {
+      if (e.code === 'ER_NO_SUCH_TABLE') return;
+      throw e;
+    }
+    for (const n of jetees) {
+      const [vivants] = await conn.query(
+        `SELECT x.id, m.file_id AS a_sa_note FROM safebox_file x LEFT JOIN safebox_note m ON m.file_id = x.id
+          WHERE x.alanyaID = ? AND x.blob_id = ? AND x.trashed_at IS NULL ORDER BY x.id`,
+        [alanyaID, n.blob_id],
+      );
+      // Pas d'exemplaire vivant, ou un vivant a déjà le sien : rien à déplacer.
+      if (!vivants.length || vivants.some((v) => v.a_sa_note != null)) continue;
+      const cible = Number(vivants[0].id);
+      const cle = n.audio_wrapped_key
+        ? wrapFileKey(unwrapFileKey(n.audio_wrapped_key, `note-${n.file_id}`, env), `note-${cible}`, env)
+        : null;
+      await conn.query('UPDATE safebox_note SET file_id = ?, audio_wrapped_key = ? WHERE file_id = ?',
+        [cible, cle, n.file_id]);
+    }
+  }
+
   async function lireNote(conn, fileId, verrou = false) {
     const [[n]] = await conn.query(`SELECT * FROM safebox_note WHERE file_id = ?${verrou ? ' FOR UPDATE' : ''}`, [fileId]);
     return n || null;
   }
 
-  async function rendreNote(storage, fileId) {
-    return noteShape(storage, (await lireNote(db, fileId)) || { file_id: fileId });
+  async function rendreNote(storage, alanyaID, f) {
+    const id = await porteur(db, alanyaID, f);
+    return noteShape(storage, (await lireNote(db, id)) || { file_id: id });
   }
 
   /** Efface chez MEGA l'audio remplacé ou supprimé ; à défaut, le rapprochement s'en charge. */
@@ -1001,17 +1073,18 @@ function createSafeboxService({
     const f = await photoAMoi(alanyaID, fileId);
     const texte = R.normalizeNoteText(body.text);
     await tx(async (conn) => {
-      const n = await lireNote(conn, f.id, true);
+      const id = await porteur(conn, alanyaID, f);
+      const n = await lireNote(conn, id, true);
       if (!texte && !(n && n.audio_prefix)) {
-        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [f.id]);
+        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [id]);
       } else {
         await conn.query(
           'INSERT INTO safebox_note (file_id, text) VALUES (?, ?) ON DUPLICATE KEY UPDATE text = VALUES(text)',
-          [f.id, texte],
+          [id, texte],
         );
       }
     });
-    return { note: await rendreNote(storage, f.id) };
+    return { note: await rendreNote(storage, alanyaID, f) };
   }
 
   /**
@@ -1028,7 +1101,8 @@ function createSafeboxService({
     const prefix = `u/${accountTag(alanyaID, env)}/${crypto.randomUUID()}/`;
     const ancien = await tx(async (conn) => {
       await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
-      const n = await lireNote(conn, f.id, true);
+      const id = await porteur(conn, alanyaID, f);
+      const n = await lireNote(conn, id, true);
       const { usedBytes } = await usageOf(conn, alanyaID);
       const libere = n && n.audio_prefix ? Number(n.audio_bytes) || 0 : 0;
       if (!R.fitsQuota({ usedBytes: usedBytes - libere, quotaBytes, addBytes: size })) {
@@ -1043,7 +1117,7 @@ function createSafeboxService({
          ON DUPLICATE KEY UPDATE audio_prefix = VALUES(audio_prefix), audio_bytes = VALUES(audio_bytes),
            audio_plain_bytes = VALUES(audio_plain_bytes), audio_duration_ms = VALUES(audio_duration_ms),
            audio_wrapped_key = NULL, audio_status = 'pending', audio_activity_at = NOW()`,
-        [f.id, prefix, size, plainSize, durationMs],
+        [id, prefix, size, plainSize, durationMs],
       );
       return n ? n.audio_prefix : null;
     });
@@ -1060,7 +1134,8 @@ function createSafeboxService({
     const storage = ready();
     const f = await photoAMoi(alanyaID, fileId);
     const cle = R.decodeFileKey(body.key);
-    const n = await lireNote(db, f.id);
+    const id = await porteur(db, alanyaID, f);
+    const n = await lireNote(db, id);
     if (!n || !n.audio_prefix || n.audio_status !== 'pending') throw introuvable();
     const objets = await storage.list(n.audio_prefix);
     const recu = objets.find((o) => o.key === R.blockKey(n.audio_prefix, 1));
@@ -1072,10 +1147,10 @@ function createSafeboxService({
     const [r] = await db.query(
       `UPDATE safebox_note SET audio_wrapped_key = ?, audio_status = 'ready', audio_activity_at = NOW()
         WHERE file_id = ? AND audio_prefix = ? AND audio_status = 'pending'`,
-      [wrapFileKey(cle, `note-${f.id}`, env), f.id, n.audio_prefix],
+      [wrapFileKey(cle, `note-${id}`, env), id, n.audio_prefix],
     );
-    if (!r.affectedRows) throw introuvable(); // remplacé entre-temps
-    return { note: await rendreNote(storage, f.id) };
+    if (!r.affectedRows) throw introuvable(); // remplacé ou déplacé entre-temps
+    return { note: await rendreNote(storage, alanyaID, f) };
   }
 
   /** `DELETE /api/safebox/files/:id/note/audio` — supprime l'audio, garde le texte. */
@@ -1083,22 +1158,23 @@ function createSafeboxService({
     const storage = ready();
     const f = await photoAMoi(alanyaID, fileId);
     const ancien = await tx(async (conn) => {
-      const n = await lireNote(conn, f.id, true);
+      const id = await porteur(conn, alanyaID, f);
+      const n = await lireNote(conn, id, true);
       if (!n || !n.audio_prefix) return null;
       if (n.text) {
         await conn.query(
           `UPDATE safebox_note SET audio_prefix = NULL, audio_bytes = NULL, audio_plain_bytes = NULL,
              audio_duration_ms = NULL, audio_wrapped_key = NULL, audio_status = NULL, audio_activity_at = NULL
            WHERE file_id = ?`,
-          [f.id],
+          [id],
         );
       } else {
-        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [f.id]);
+        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [id]);
       }
       return n.audio_prefix;
     });
     await effacerAudio(storage, ancien);
-    return { note: await rendreNote(storage, f.id) };
+    return { note: await rendreNote(storage, alanyaID, f) };
   }
 
   // ── Envois ───────────────────────────────────────────────────────────────

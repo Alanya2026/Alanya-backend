@@ -1159,6 +1159,53 @@ test('commentaire d\'une photo : texte, audio, privé, compté dans l\'espace (m
   assert.strictEqual(Number(parti.n), 0);
 });
 
+test('commentaire : un seul par photo, dans Photos comme dans ses albums, et il suit la photo (31/10/2026)', async () => {
+  const [[t]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'safebox_note'`,
+  );
+  if (!Number(t.n)) return;
+  const L = await compte('Lina');
+  const racines = Object.fromEntries((await svc.overview(L)).roots.map((r) => [r.root, r.id]));
+  const photo = await deposerFichier(L, racines.photos, 'Kribi.jpg', 30);
+  const album = await svc.createFolder(L, { parentId: racines.albums, name: 'Kribi' });
+  const { files: [copie] } = await svc.addToFolder(L, album.id, { fileIds: [photo.id] });
+  const noteDans = async (dossier, id) => (await svc.listFolder(L, dossier)).files.find((x) => x.id === id).note;
+  const lignes = async () => (await pool.query(
+    'SELECT n.file_id FROM safebox_note n JOIN safebox_file f ON f.id = n.file_id WHERE f.alanyaID = ?', [L],
+  ))[0].map((r) => Number(r.file_id));
+
+  // Écrit dans Photos, lu dans l'album ; modifié dans l'album, c'est le même.
+  await svc.setNoteText(L, photo.id, { text: 'Avant la pluie' });
+  assert.strictEqual((await noteDans(album.id, copie.id)).text, 'Avant la pluie');
+  await svc.setNoteText(L, copie.id, { text: 'Avant la pluie, avec Paul' });
+  assert.strictEqual((await noteDans(racines.photos, photo.id)).text, 'Avant la pluie, avec Paul');
+  assert.deepStrictEqual(await lignes(), [photo.id], 'une seule ligne, sur le premier exemplaire');
+
+  // Un audio ajouté depuis l'album rejoint le même commentaire.
+  const r = await svc.reserveNoteAudio(L, copie.id, { size: 1000, plainSize: 984, durationMs: 5000 });
+  stockage.objets.set(r.url.replace('https://s4.test/put/', '').replace(/\?size=\d+$/, ''), 1000);
+  await svc.completeNoteAudio(L, copie.id, { key: cle.toString('base64') });
+  assert.strictEqual((await noteDans(racines.photos, photo.id)).audio.durationMs, 5000);
+
+  // La photo de Photos à la corbeille : le commentaire passe sur l'exemplaire de
+  // l'album, audio lisible (clé rechiffrée), rien de compté comme corbeille.
+  await svc.trashFile(L, photo.id);
+  assert.deepStrictEqual(await lignes(), [copie.id]);
+  const deplace = await noteDans(album.id, copie.id);
+  assert.strictEqual(deplace.text, 'Avant la pluie, avec Paul');
+  assert.strictEqual(deplace.audio.key, cle.toString('base64'));
+  assert.strictEqual((await svc.usageOf(L)).trashBytes, 0);
+  // La corbeille vidée, il reste.
+  await svc.emptyTrash(L);
+  assert.strictEqual((await noteDans(album.id, copie.id)).text, 'Avant la pluie, avec Paul');
+
+  // Le dernier exemplaire à la corbeille puis restauré : le commentaire revient avec lui.
+  await svc.trashFile(L, copie.id);
+  await svc.restoreFile(L, copie.id);
+  assert.strictEqual((await noteDans(album.id, copie.id)).text, 'Avant la pluie, avec Paul');
+});
+
 test('albums récents (30/10/2026) : les derniers remplis, leur nombre, quatre couvertures', async () => {
   const R2 = await compte('Rita');
   const racines = Object.fromEntries((await svc.overview(R2)).roots.map((r) => [r.root, r.id]));
