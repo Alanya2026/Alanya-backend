@@ -83,10 +83,15 @@ const { getMyMedia } = require('../controllers/profileMediaController');
  *               password:
  *                 type: string
  *                 minLength: 6
+ *                 description: Sans espace
  *               nom:
  *                 type: string
+ *                 minLength: 3
+ *                 description: Lettres, chiffres, espaces, - ' et _ (pas de ponctuation)
  *               pseudo:
  *                 type: string
+ *                 minLength: 3
+ *                 description: Mêmes règles que nom
  *               idPays:
  *                 type: integer
  *     responses:

@@ -11,6 +11,7 @@ const { emitToUser } = require('../utils/userSocketRegistry');
 const recoveryCode = require('../services/recoveryCodeService');
 const { lookupPlace } = require('../services/ipGeoService');
 const { guardDisplayNames } = require('../utils/displayNameGuard');
+const { checkDisplayName, passwordHasWhitespace } = require('../utils/accountInputRules');
 const { ACCOUNT_TYPE } = require('../constants/accountTypes');
 const { isOfficialAccount } = require('../utils/officialAccountGuard');
 const { ensureDefaultContactLists } = require('../utils/defaultContactLists');
@@ -139,6 +140,18 @@ const register = async (req, res) => {
 
     if (password.length < 6) {
       return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caractères', code: 'INVALID_PASSWORD' });
+    }
+
+    if (passwordHasWhitespace(password)) {
+      return res.status(400).json({ error: 'Le mot de passe ne doit pas contenir d\'espace', code: 'PASSWORD_HAS_SPACES' });
+    }
+
+    for (const [field, value] of [['nom', nom], ['pseudo', pseudo]]) {
+      if (value == null || String(value).trim() === '') continue;
+      const nameCheck = checkDisplayName(field, value);
+      if (!nameCheck.ok) {
+        return res.status(400).json({ error: nameCheck.message, code: nameCheck.code });
+      }
     }
 
     // Voir login() : sans identifiant d'appareil, la session serait irrévocable.
@@ -664,6 +677,10 @@ const completePasswordReset = async (req, res) => {
       return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères', code: 'INVALID_PASSWORD' });
     }
 
+    if (passwordHasWhitespace(newPassword)) {
+      return res.status(400).json({ error: 'Le mot de passe ne doit pas contenir d\'espace', code: 'PASSWORD_HAS_SPACES' });
+    }
+
     // Vérifier le reset token
     let decoded;
     try {
@@ -852,6 +869,16 @@ const updateMe = async (req, res) => {
     });
     if (!nameGuard.ok) {
       return res.status(400).json({ error: nameGuard.message, code: nameGuard.code });
+    }
+
+    // Un nom déjà enregistré repasse tel quel : un compte créé avant la règle
+    // des 3 caractères peut encore modifier sa bio sans se renommer.
+    for (const [field, value] of [['nom', nom], ['pseudo', pseudo]]) {
+      if (!value || String(value).trim() === String(selfRows[0]?.[field] ?? '').trim()) continue;
+      const nameCheck = checkDisplayName(field, value);
+      if (!nameCheck.ok) {
+        return res.status(400).json({ error: nameCheck.message, code: nameCheck.code });
+      }
     }
 
     if (bio !== undefined) {
@@ -1101,6 +1128,12 @@ const changePassword = async (req, res) => {
     if (newPassword.length < 6) {
       return res.status(400).json({
         error: 'Le nouveau mot de passe doit contenir au moins 6 caractères', code: 'INVALID_PASSWORD',
+      });
+    }
+
+    if (passwordHasWhitespace(newPassword)) {
+      return res.status(400).json({
+        error: 'Le nouveau mot de passe ne doit pas contenir d\'espace', code: 'PASSWORD_HAS_SPACES',
       });
     }
 
