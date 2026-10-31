@@ -3411,9 +3411,15 @@ const callVideoUpgrade = (io, socket) => {
   relay('call_video_upgrade_offer', 'call_video_upgrade_offer', 'offer');
   relay('call_video_upgrade_answer', 'call_video_upgrade_answer', 'answer');
 
-  socket.on('call_video_upgrade_commit', async (data) => {
+  socket.on('call_video_upgrade_commit', async (data, acknowledge) => {
+    const reject = (code) => {
+      if (typeof acknowledge === 'function') acknowledge({ ok: false, code });
+    };
     try {
-      if (!socket.authenticated) return;
+      if (!socket.authenticated) {
+        reject('UNAUTHENTICATED');
+        return;
+      }
       const targetID = toInt(data?.targetUserId);
       const callId = data?.callId != null ? String(data.callId) : '';
       const transitionId = data?.transitionId != null
@@ -3424,7 +3430,10 @@ const callVideoUpgrade = (io, socket) => {
         !callId ||
         transitionId.length < 8 ||
         transitionId.length > 128
-      ) return;
+      ) {
+        reject('INVALID_COMMIT');
+        return;
+      }
 
       const userID = socket.alanyaID;
       const entry = await callState.getEntry(userID);
@@ -3433,26 +3442,86 @@ const callVideoUpgrade = (io, socket) => {
         entry.status !== 'in_call' ||
         String(entry.callId) !== callId ||
         Number(entry.peerId) !== targetID
-      ) return;
+      ) {
+        reject('CALL_VIDEO_UPGRADE_INVALID');
+        return;
+      }
       const sourceDeviceId = normalizeDeviceId(socket.deviceId);
       if (
         !sourceDeviceId ||
         !(await callDeviceOwnership.isOwnerDevice(callId, userID, sourceDeviceId))
-      ) return;
+      ) {
+        reject('CALL_VIDEO_UPGRADE_NOT_OWNER');
+        return;
+      }
       const targetDeviceId = await callDeviceOwnership.getActiveDeviceId(
         callId,
         targetID,
       );
-      if (!targetDeviceId) return;
-      emitToDevice(io, targetID, targetDeviceId, 'call_video_upgrade_commit', {
+      if (!targetDeviceId) {
+        reject('CALL_VIDEO_UPGRADE_TARGET_OFFLINE');
+        return;
+      }
+      const emitted = emitToDevice(io, targetID, targetDeviceId, 'call_video_upgrade_commit', {
         callId,
         peerId: String(userID),
         transitionId,
       });
+      if (!emitted) {
+        reject('CALL_VIDEO_UPGRADE_DELIVERY_FAILED');
+        return;
+      }
+      if (typeof acknowledge === 'function') acknowledge({ ok: true });
     } catch (error) {
       console.error('[Socket call_video_upgrade_commit]', error.message);
+      reject('CALL_VIDEO_UPGRADE_ERROR');
     }
   });
+
+  const relayControl = (event, outgoingEvent) => {
+    socket.on(event, async (data) => {
+      try {
+        if (!socket.authenticated) return;
+        const targetID = toInt(data?.targetUserId);
+        const callId = data?.callId != null ? String(data.callId) : '';
+        const transitionId = data?.transitionId != null
+          ? String(data.transitionId)
+          : '';
+        if (!targetID || !callId || transitionId.length < 8 || transitionId.length > 128) {
+          return;
+        }
+        const userID = socket.alanyaID;
+        const entry = await callState.getEntry(userID);
+        if (
+          !entry ||
+          entry.status !== 'in_call' ||
+          String(entry.callId) !== callId ||
+          Number(entry.peerId) !== targetID
+        ) return;
+        const sourceDeviceId = normalizeDeviceId(socket.deviceId);
+        if (
+          !sourceDeviceId ||
+          !(await callDeviceOwnership.isOwnerDevice(callId, userID, sourceDeviceId))
+        ) return;
+        const targetDeviceId = await callDeviceOwnership.getActiveDeviceId(
+          callId,
+          targetID,
+        );
+        if (!targetDeviceId) return;
+        emitToDevice(io, targetID, targetDeviceId, outgoingEvent, {
+          callId,
+          peerId: String(userID),
+          transitionId,
+        });
+      } catch (error) {
+        console.error(`[Socket ${event}]`, error.message);
+      }
+    });
+  };
+
+  relayControl('call_video_upgrade_commit_ack', 'call_video_upgrade_commit_ack');
+  relayControl('call_video_upgrade_ack_request', 'call_video_upgrade_ack_request');
+  relayControl('call_video_upgrade_cancel', 'call_video_upgrade_cancel');
 };
 
 module.exports = {

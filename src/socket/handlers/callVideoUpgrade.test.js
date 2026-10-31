@@ -17,8 +17,8 @@ function fakeSocket(userId, deviceId) {
     on(event, handler) {
       handlers[event] = handler;
     },
-    async trigger(event, data) {
-      await handlers[event](data);
+    async trigger(event, data, acknowledge) {
+      await handlers[event](data, acknowledge);
     },
     emitted,
   };
@@ -103,6 +103,52 @@ async function main() {
   });
   assert.strictEqual(io3.roomEmits.length, 0, 'un callId périmé est rejeté');
   assert.strictEqual(stale.emitted[0].payload.code, 'CALL_VIDEO_UPGRADE_INVALID');
+
+  await reset();
+  await setCall();
+  const io4 = fakeIo();
+  const commitOwner = fakeSocket(10, 'dev_10');
+  callVideoUpgrade(io4, commitOwner, userSockets);
+  let commitAck;
+  await commitOwner.trigger(
+    'call_video_upgrade_commit',
+    {
+      targetUserId: 77,
+      callId: '1329',
+      transitionId: 'transition-004',
+    },
+    (payload) => {
+      commitAck = payload;
+    },
+  );
+  assert.deepStrictEqual(commitAck, { ok: true });
+  assert.strictEqual(io4.roomEmits[0].event, 'call_video_upgrade_commit');
+
+  await reset();
+  await setCall();
+  const io5 = fakeIo();
+  const ackOwner = fakeSocket(77, 'dev_77');
+  callVideoUpgrade(io5, ackOwner, userSockets);
+  await ackOwner.trigger('call_video_upgrade_commit_ack', {
+    targetUserId: 10,
+    callId: '1329',
+    transitionId: 'transition-005',
+  });
+  assert.strictEqual(io5.roomEmits[0].room, deviceRoom(10, 'dev_10'));
+  assert.strictEqual(io5.roomEmits[0].event, 'call_video_upgrade_commit_ack');
+
+  await reset();
+  await setCall();
+  const io6 = fakeIo();
+  const requestOwner = fakeSocket(10, 'dev_10');
+  callVideoUpgrade(io6, requestOwner, userSockets);
+  await requestOwner.trigger('call_video_upgrade_ack_request', {
+    targetUserId: 77,
+    callId: '1329',
+    transitionId: 'transition-006',
+  });
+  assert.strictEqual(io6.roomEmits[0].room, deviceRoom(77, 'dev_77'));
+  assert.strictEqual(io6.roomEmits[0].event, 'call_video_upgrade_ack_request');
 
   await reset();
   console.log('callVideoUpgrade.test.js OK');
