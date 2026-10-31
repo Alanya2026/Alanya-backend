@@ -68,6 +68,12 @@ router.get('/', auth, lecture, c.overview);
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
+ * /api/safebox/albums/recent:
+ *   get:
+ *     summary: "Albums de l'accueil (?limit=, 3 par défaut, 12 au plus) — les derniers remplis, avec leur nombre de fichiers et 4 fichiers de couverture (photos et vidéos d'abord)"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
  * /api/safebox/folders:
  *   post:
  *     summary: "Créer un sous-dossier — { parentId, name }"
@@ -91,6 +97,7 @@ router.get('/', auth, lecture, c.overview);
  *       400:
  *         description: "SAFEBOX_INVALID_MOVE (dossier hors d'Albums, liste vide ou trop longue)"
  */
+router.get('/albums/recent', auth, lecture, c.recentAlbums);
 router.get('/folders/:id', auth, lecture, c.listFolder);
 router.post('/folders', auth, ecriture, c.createFolder);
 router.patch('/folders/:id', auth, ecriture, c.updateFolder);

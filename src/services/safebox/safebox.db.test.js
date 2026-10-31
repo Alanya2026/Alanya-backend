@@ -1159,6 +1159,43 @@ test('commentaire d\'une photo : texte, audio, privé, compté dans l\'espace (m
   assert.strictEqual(Number(parti.n), 0);
 });
 
+test('albums récents (30/10/2026) : les derniers remplis, leur nombre, quatre couvertures', async () => {
+  const R2 = await compte('Rita');
+  const racines = Object.fromEntries((await svc.overview(R2)).roots.map((r) => [r.root, r.id]));
+  assert.deepStrictEqual((await svc.recentAlbums(R2)).albums, []);
+  const ancien = await svc.createFolder(R2, { parentId: racines.albums, name: 'Ancien' });
+  const plein = await svc.createFolder(R2, { parentId: racines.albums, name: 'Plein' });
+  const vide = await svc.createFolder(R2, { parentId: racines.albums, name: 'Vide' });
+  const sousPhotos = await svc.createFolder(R2, { parentId: racines.photos, name: 'Pas un album' });
+  await deposerFichier(R2, ancien.id, 'a.jpg');
+  const docs = [];
+  for (let i = 0; i < 3; i += 1) docs.push(await deposerFichier(R2, plein.id, `doc${i}.pdf`));
+  const photos = [];
+  for (let i = 0; i < 3; i += 1) photos.push(await deposerFichier(R2, plein.id, `p${i}.jpg`));
+  await deposerFichier(R2, sousPhotos.id, 'x.jpg');
+  // L'ordre suit le dernier ajout, pas la création : « Ancien » vient d'être rempli.
+  await pool.query('UPDATE safebox_folder SET created_at = NOW() - INTERVAL 3 DAY WHERE id IN (?)', [[ancien.id, plein.id]]);
+  await pool.query('UPDATE safebox_folder SET created_at = NOW() - INTERVAL 2 DAY WHERE id = ?', [vide.id]);
+  await pool.query('UPDATE safebox_file SET created_at = NOW() - INTERVAL 1 DAY WHERE folder_id = ?', [plein.id]);
+  const { albums } = await svc.recentAlbums(R2);
+  assert.deepStrictEqual(albums.map((a) => a.name), ['Ancien', 'Plein', 'Vide']);
+  const [a, p, v] = albums;
+  assert.strictEqual(a.fileCount, 1);
+  assert.strictEqual(p.fileCount, 6);
+  assert.strictEqual(v.fileCount, 0);
+  assert.strictEqual(v.lastAddedAt, null);
+  assert.deepStrictEqual(v.cover, []);
+  // Quatre couvertures, photos d'abord (les plus récentes), puis un document ; clé comprise.
+  assert.deepStrictEqual(p.cover.map((f) => f.name), ['p2.jpg', 'p1.jpg', 'p0.jpg', 'doc2.pdf']);
+  assert.ok(p.cover.every((f) => f.key && f.folderId === plein.id));
+  // Une corbeille et un sous-dossier de Photos n'y sont pas.
+  await svc.trashFile(R2, photos[2].id);
+  assert.deepStrictEqual((await svc.recentAlbums(R2)).albums[1].cover.map((f) => f.name), ['p1.jpg', 'p0.jpg', 'doc2.pdf', 'doc1.pdf']);
+  assert.strictEqual((await svc.recentAlbums(R2)).albums[1].fileCount, 5);
+  assert.ok(!(await svc.recentAlbums(R2, { limit: 12 })).albums.some((x) => x.name === 'Pas un album'));
+  assert.strictEqual((await svc.recentAlbums(R2, { limit: 1 })).albums.length, 1);
+});
+
 (async () => {
   try {
     for (const [nom, fn] of etapes) {

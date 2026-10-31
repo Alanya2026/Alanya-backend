@@ -467,11 +467,58 @@ function createSafeboxService({
     return out;
   }
 
-  const FICHIER = `SELECT f.id, f.folder_id, f.name, f.ext, f.mime, f.family, f.original_bytes,
+  const COLONNES_FICHIER = `f.id, f.folder_id, f.name, f.ext, f.mime, f.family, f.original_bytes,
                           f.compressed, f.trashed_at, f.trashed_by_folder, f.created_at, f.updated_at,
                           b.id AS blob_id, b.prefix, b.block_size, b.block_count, b.stored_bytes,
-                          b.plain_bytes, b.preview_bytes, b.cipher_format, b.wrapped_key, b.status
-                     FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id`;
+                          b.plain_bytes, b.preview_bytes, b.cipher_format, b.wrapped_key, b.status`;
+  const FICHIER = `SELECT ${COLONNES_FICHIER} FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id`;
+
+  /**
+   * `GET /api/safebox/albums/recent` — les albums de l'accueil en une seule
+   * demande (30/10/2026) : les derniers remplis (dernier ajout, sinon
+   * création), leur nombre de fichiers et quatre fichiers de couverture,
+   * photos et vidéos d'abord. Seules ces couvertures portent leur clé.
+   */
+  async function recentAlbums(alanyaID, { limit } = {}) {
+    const storage = ready();
+    const n = Math.min(Math.max(R.parseId(limit) ?? 3, 1), 12);
+    const racine = (await ensureAccount(alanyaID)).albums;
+    if (!racine) return { albums: [] };
+    const [albums] = await db.query(
+      `SELECT fo.id, fo.parent_id, fo.root, fo.name, fo.depth, fo.created_at, fo.updated_at,
+              COUNT(f.id) AS fichiers, MAX(f.created_at) AS dernier_ajout
+         FROM safebox_folder fo
+         LEFT JOIN (SELECT f.id, f.folder_id, f.created_at
+                      FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+                     WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready') f
+                ON f.folder_id = fo.id
+        WHERE fo.parent_id = ? AND fo.alanyaID = ? AND fo.trashed_at IS NULL
+        GROUP BY fo.id
+        ORDER BY COALESCE(dernier_ajout, fo.created_at) DESC, fo.id DESC
+        LIMIT ${n}`,
+      [alanyaID, racine.id, alanyaID],
+    );
+    if (!albums.length) return { albums: [] };
+    const [couvertures] = await db.query(
+      `SELECT * FROM (
+         SELECT ${COLONNES_FICHIER},
+                ROW_NUMBER() OVER (PARTITION BY f.folder_id
+                                   ORDER BY f.family IN ('photos', 'videos') DESC, f.id DESC) AS rang
+           FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+          WHERE f.folder_id IN (?) AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+       ) x WHERE x.rang <= 4 ORDER BY x.folder_id, x.rang`,
+      [albums.map((a) => a.id), alanyaID],
+    );
+    const formes = await Promise.all((await enrichir(couvertures)).map((f) => fileShape(f, storage)));
+    return {
+      albums: albums.map((a) => ({
+        ...folderShape(a),
+        fileCount: Number(a.fichiers),
+        lastAddedAt: a.dernier_ajout ?? null,
+        cover: formes.filter((f) => f.folderId === Number(a.id)),
+      })),
+    };
+  }
 
   /** `GET /api/safebox/folders/:id` — sous-dossiers, puis fichiers par pages. */
   async function listFolder(alanyaID, folderId, { cursor } = {}) {
@@ -2358,6 +2405,7 @@ function createSafeboxService({
   return {
     overview,
     listFolder,
+    recentAlbums,
     createFolder,
     updateFolder,
     trashFolder,

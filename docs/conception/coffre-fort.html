@@ -480,7 +480,14 @@
         <p>MEGA, ou quelqu'un qui volerait les clés du bucket, ne peut rien lire. Alanya, en revanche, peut techniquement déchiffrer un fichier, puisque le serveur garde les clés. C'est le même choix que pour la sauvegarde sur Drive. La politique de confidentialité doit le dire en ces termes et ne pas parler de chiffrement de bout en bout.</p>
         <p>Un coffre dont seul l'inscrit aurait la clé est possible plus tard, mais un téléphone perdu sans code de récupération ferait perdre tout le coffre. Décision du 15/10 : le serveur garde les clés.</p>
       </div>
-      <p>Perdre <code>SAFEBOX_KEY</code> rend tous les coffres illisibles. Elle doit être sauvegardée hors du serveur, avec les autres secrets, et ne jamais changer sans un script qui rechiffre les clés des fichiers.</p>
+      <p>Perdre <code>SAFEBOX_KEY</code> rend tous les coffres illisibles. Elle doit être sauvegardée hors du serveur, avec les autres secrets.</p>
+      <p><strong>Le trousseau (30/10/2026).</strong> Les clés maîtresses sont numérotées pour pouvoir en changer (fuite, départ d'un administrateur) sans perdre de coffre :</p>
+      <ul>
+        <li>Une clé de fichier rangée en base porte le numéro de sa clé maîtresse (format <code>SK2</code>) ; les anciennes, au format <code>SK1</code>, sont sous la n° 1 et restent lisibles.</li>
+        <li>La clé en service : <code>SAFEBOX_KEY</code>, ou mieux <code>SAFEBOX_KEY_FILE</code>, le chemin d'un fichier lisible du seul compte du serveur (<code>chmod 600</code>), hors du <code>.env</code> ; son numéro : <code>SAFEBOX_KEY_ID</code> (1 par défaut). Une ancienne clé reste en <code>SAFEBOX_KEY_&lt;n&gt;</code> ou <code>SAFEBOX_KEY_&lt;n&gt;_FILE</code>.</li>
+        <li>Changer de clé : la créer et la sauvegarder hors du serveur, la poser comme clé en service avec le numéro suivant, garder l'ancienne au trousseau, redémarrer, puis <code>scripts/maintenance/safebox-rechiffrer-cles.js</code> (simulation, puis <code>--apply</code>). Rien ne change chez MEGA.</li>
+        <li>Les empreintes (noms des comptes chez MEGA, originaux de la sauvegarde automatique) restent calculées sous la clé n° 1, qui reste donc au trousseau. Après une fuite seulement, on la retire : la sauvegarde automatique renvoie alors tout une fois.</li>
+      </ul>
     </div>
   </section>
 
@@ -584,7 +591,7 @@
         <table class="tbl-prose">
           <thead><tr><th>Écran</th><th>Contenu</th></tr></thead>
           <tbody>
-            <tr><td>Accueil</td><td>Un seul écran depuis le 30/10. De haut en bas : la carte d'espace ; une carte d'état qui réunit les envois (elle ouvre les transferts) et la sauvegarde automatique (« 32 fichiers en attente de Wi-Fi » avec « Envoyer avec les données mobiles », ou « À jour ») ; la carte « Libérer la mémoire du téléphone » quand elle est presque pleine ; Mes dossiers (les six, Partager compris) ; Albums récents ; Libérer de l'espace et la corbeille ; un bouton rond « + ». En haut, les transferts.</td></tr>
+            <tr><td>Accueil</td><td>Un seul écran depuis le 30/10. De haut en bas : la carte d'espace ; une carte d'état qui réunit les envois (elle ouvre les transferts) et la sauvegarde automatique (« 32 fichiers en attente de Wi-Fi » avec « Envoyer avec les données mobiles », ou « À jour ») ; la carte « Libérer la mémoire du téléphone » quand elle est presque pleine ; Mes dossiers (les six, Partager compris) ; Albums récents (les trois derniers remplis, sur une ligne, quatre aperçus chacun, photos et vidéos d'abord, en une seule demande au serveur ; « + » pour en créer un, « Tout voir » pour les autres) ; Libérer de l'espace et la corbeille ; un bouton rond « + ». En haut, les transferts.</td></tr>
             <tr><td>Barre du bas</td><td>Retirée le 30/10 : les transferts s'ouvrent depuis la carte d'état et l'icône de la barre du haut (avec le nombre en cours) ; Partager, comme les autres dossiers.</td></tr>
             <tr><td>Fichiers</td><td>Retiré le 30/10 : les six dossiers sont sur l'accueil.</td></tr>
             <tr><td>Photos, Vidéos, Audio, Documents</td><td>Par jour, filtres par dossier du téléphone, pastille sur les fichiers en attente. Pas de bouton « Ajouter » dans Photos, qui se remplit seul.</td></tr>

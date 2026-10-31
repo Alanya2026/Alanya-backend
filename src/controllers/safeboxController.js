@@ -34,6 +34,7 @@ const moi = (req) => req.user.alanyaID;
 
 exports.overview = route('overview', (s, req) => s.overview(moi(req)));
 exports.listFolder = route('listFolder', (s, req) => s.listFolder(moi(req), req.params.id, { cursor: req.query.cursor }));
+exports.recentAlbums = route('recentAlbums', (s, req) => s.recentAlbums(moi(req), { limit: req.query.limit }));
 exports.createFolder = route('createFolder', (s, req) => s.createFolder(moi(req), req.body), 201);
 exports.updateFolder = route('updateFolder', (s, req) => s.updateFolder(moi(req), req.params.id, req.body));
 exports.trashFolder = route('trashFolder', (s, req) => s.trashFolder(moi(req), req.params.id));
