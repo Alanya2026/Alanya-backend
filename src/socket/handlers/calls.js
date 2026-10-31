@@ -3477,6 +3477,50 @@ const callVideoUpgrade = (io, socket) => {
       reject('CALL_VIDEO_UPGRADE_ERROR');
     }
   });
+
+  const relayControl = (event, outgoingEvent) => {
+    socket.on(event, async (data) => {
+      try {
+        if (!socket.authenticated) return;
+        const targetID = toInt(data?.targetUserId);
+        const callId = data?.callId != null ? String(data.callId) : '';
+        const transitionId = data?.transitionId != null
+          ? String(data.transitionId)
+          : '';
+        if (!targetID || !callId || transitionId.length < 8 || transitionId.length > 128) {
+          return;
+        }
+        const userID = socket.alanyaID;
+        const entry = await callState.getEntry(userID);
+        if (
+          !entry ||
+          entry.status !== 'in_call' ||
+          String(entry.callId) !== callId ||
+          Number(entry.peerId) !== targetID
+        ) return;
+        const sourceDeviceId = normalizeDeviceId(socket.deviceId);
+        if (
+          !sourceDeviceId ||
+          !(await callDeviceOwnership.isOwnerDevice(callId, userID, sourceDeviceId))
+        ) return;
+        const targetDeviceId = await callDeviceOwnership.getActiveDeviceId(
+          callId,
+          targetID,
+        );
+        if (!targetDeviceId) return;
+        emitToDevice(io, targetID, targetDeviceId, outgoingEvent, {
+          callId,
+          peerId: String(userID),
+          transitionId,
+        });
+      } catch (error) {
+        console.error(`[Socket ${event}]`, error.message);
+      }
+    });
+  };
+
+  relayControl('call_video_upgrade_commit_ack', 'call_video_upgrade_commit_ack');
+  relayControl('call_video_upgrade_cancel', 'call_video_upgrade_cancel');
 };
 
 module.exports = {
