@@ -333,7 +333,7 @@
         <li><strong>« Ne plus sauvegarder ».</strong> Un fichier supprimé du coffre alors qu'il est encore sur le téléphone n'est pas renvoyé. Le téléphone garde la liste, et le serveur aussi, par une empreinte de l'original, pour qu'une réinstallation ne renvoie pas tout.</li>
         <li><strong>Pas de doublon.</strong> Avant d'envoyer, le téléphone compare l'empreinte de l'original à celles déjà sauvegardées. Une photo déjà présente, par exemple ajoutée à la main dans un album avant l'activation, n'est pas renvoyée : Photos désigne les mêmes blocs.</li>
         <li><strong>Données mobiles seulement avec l'accord de l'inscrit.</strong> L'accueil affiche « 32 fichiers en attente de Wi-Fi » avec un bouton « Envoyer avec les données mobiles ».</li>
-        <li><strong>Espace plein.</strong> La sauvegarde s'arrête, et une notification propose Alanya Plus ou « Libérer de l'espace ». Elle reprend dès que de la place se libère.</li>
+        <li><strong>Espace plein.</strong> La sauvegarde part du plus récent au plus ancien, toutes sources confondues (31/10). Un fichier qui ne tient plus est passé, sans arrêter les plus petits qui tiennent encore ; l'accueil dit alors « Espace plein : 12 fichiers attendent de la place » avec Alanya Plus. Ils partent dès que de la place se libère.</li>
         <li><strong>Une vidéo de plus de 1 Go en Original passe en HD</strong>, avec une notification.</li>
         <li><strong>Changer la qualité ne touche que les fichiers suivants.</strong> <span class="chip todo">à confirmer</span> Le menu d'un fichier propose « Sauvegarder en Original » tant que l'original est encore sur le téléphone : le fichier est alors renvoyé en entier.</li>
         <li><strong>En tâche de fond.</strong> WorkManager d'Android (contraintes : réseau non facturé, charge) réveille le service de premier plan qui existe déjà pour les envois (<code>SafeboxTransferService</code>). Un passage a aussi lieu au démarrage de l'application et au retour du Wi-Fi. La reprise par blocs de la section 04 s'applique telle quelle.</li>
@@ -557,7 +557,7 @@
             <tr><td>Photo</td><td>La photo elle-même, nette, environ 480 px</td></tr>
             <tr><td>Vidéo</td><td>Une image de la vidéo, sa durée et sa définition</td></tr>
             <tr><td>PDF</td><td>La première page et le nombre de pages</td></tr>
-            <tr><td>Audio</td><td>La pochette si le fichier en a une, sinon une icône ; titre, artiste et durée</td></tr>
+            <tr><td>Audio</td><td>La pochette si le fichier en a une (réduite à 480 px en JPEG, comme une photo, depuis le 31/10), sinon une icône ; titre, artiste et durée</td></tr>
             <tr><td>Autres documents</td><td>Une icône du type avec l'extension</td></tr>
             <tr><td>Album ou sélection</td><td>Les quatre premiers aperçus en mosaïque et le nombre restant</td></tr>
           </tbody>
@@ -669,7 +669,7 @@
       </ul>
       <h3>Ce qui pousse vers Alanya Plus</h3>
       <ul class="plain">
-        <li>La sauvegarde automatique, qui remplit l'espace puis s'arrête avec l'offre quand il est plein.</li>
+        <li>La sauvegarde automatique, qui remplit l'espace avec les plus récents puis propose l'offre pour ce qui ne tient plus.</li>
         <li>Original présélectionné quand tout tient, et pour les ajouts à la main.</li>
         <li>Le dossier Partager, gardé sur l'espace de l'expéditeur jusqu'à ce qu'il le vide.</li>
         <li>« Garder dans mon coffre », qui consomme l'espace du destinataire.</li>
