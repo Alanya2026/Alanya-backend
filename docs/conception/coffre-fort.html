@@ -199,7 +199,7 @@
 <div class="page">
 
   <header class="masthead">
-    <div class="kicker">Alanya · backend, app et admin · conception · 26/10/2026 · version 17 · refonte : six dossiers, sauvegarde automatique, trois formats, envoi en carte ; lots 6 à 9 codés</div>
+    <div class="kicker">Alanya · backend, app et admin · conception · 26/10/2026 · version 18 · refonte : six dossiers, sauvegarde automatique, trois formats, envoi en carte ; lots 6 à 10 codés</div>
     <h1>Le coffre-fort</h1>
     <p class="standfirst">Le coffre sauvegarde tout seul les photos, vidéos, audios et documents du téléphone, garde les albums que l'inscrit compose lui-même, et sert à envoyer à d'autres inscrits des fichiers trop lourds pour une discussion, jusqu'à 1 Go. Les fichiers vivent chez MEGA S4, chiffrés par le téléphone.</p>
   </header>
@@ -304,10 +304,10 @@
         <li><strong>Une photo supprimée de Photos mais encore sur le téléphone n'est pas renvoyée</strong> par la sauvegarde (section 03).</li>
       </ul>
       <h3>Commentaire d'une photo</h3>
-      <p>Décision du 18/10 : chaque photo peut recevoir un commentaire, facultatif — un texte de 200 caractères au plus, un audio de 5 minutes au plus, ou les deux. <span class="chip todo">à confirmer</span> Le commentaire suit la photo : le même dans Photos et dans ses albums.</p>
+      <p>Décision du 18/10 : chaque photo peut recevoir un commentaire, facultatif — un texte de 200 caractères au plus, un audio de 5 minutes au plus, ou les deux. <span class="chip ok">décidé le 31/10</span> Le commentaire suit la photo : le même dans Photos et dans ses albums. Il est rangé sur un seul exemplaire et passe sur un autre quand celui-ci part à la corbeille : il ne disparaît qu'avec le dernier exemplaire.</p>
       <ul class="plain">
         <li><strong>Privé.</strong> Il reste dans le coffre de son auteur : il ne part pas avec la photo envoyée dans une discussion, et la copie qu'un destinataire garde n'en a pas. La modération ne le voit pas non plus.</li>
-        <li><strong>Où on le voit.</strong> La photo s'ouvre dans l'application avec son commentaire en dessous : le texte, et un lecteur pour l'audio. Dans la grille, une pastille micro signale qu'il y en a un.</li>
+        <li><strong>Où on le voit.</strong> La photo s'ouvre dans l'application avec son commentaire en dessous : le texte, et un lecteur pour l'audio. Dans la grille, une pastille le signale : une bulle pour un texte, un micro pour un audio seul. Dans Photos et dans un album, le filtre « Avec commentaire » ne montre que les photos commentées. La feuille du commentaire rappelle la photo (miniature et nom) et remonte au-dessus du clavier.</li>
         <li><strong>L'audio</strong> s'enregistre comme un message vocal (AAC mono, 32 kbit/s : environ 1,2 Mo pour 5 minutes, arrêt automatique à 5:00). Le téléphone le chiffre avec une clé neuve et l'envoie directement chez MEGA. Il compte dans l'espace du coffre.</li>
         <li><strong>Suppression.</strong> Réenregistrer remplace l'ancien audio, effacé tout de suite chez MEGA. Le commentaire disparaît avec la photo, quand elle n'est plus nulle part.</li>
       </ul>
@@ -333,7 +333,7 @@
         <li><strong>« Ne plus sauvegarder ».</strong> Un fichier supprimé du coffre alors qu'il est encore sur le téléphone n'est pas renvoyé. Le téléphone garde la liste, et le serveur aussi, par une empreinte de l'original, pour qu'une réinstallation ne renvoie pas tout.</li>
         <li><strong>Pas de doublon.</strong> Avant d'envoyer, le téléphone compare l'empreinte de l'original à celles déjà sauvegardées. Une photo déjà présente, par exemple ajoutée à la main dans un album avant l'activation, n'est pas renvoyée : Photos désigne les mêmes blocs.</li>
         <li><strong>Données mobiles seulement avec l'accord de l'inscrit.</strong> L'accueil affiche « 32 fichiers en attente de Wi-Fi » avec un bouton « Envoyer avec les données mobiles ».</li>
-        <li><strong>Espace plein.</strong> La sauvegarde s'arrête, et une notification propose Alanya Plus ou « Libérer de l'espace ». Elle reprend dès que de la place se libère.</li>
+        <li><strong>Espace plein.</strong> La sauvegarde part du plus récent au plus ancien, toutes sources confondues (31/10). Un fichier qui ne tient plus est passé, sans arrêter les plus petits qui tiennent encore ; l'accueil dit alors « Espace plein : 12 fichiers attendent de la place » avec Alanya Plus. Ils partent dès que de la place se libère.</li>
         <li><strong>Une vidéo de plus de 1 Go en Original passe en HD</strong>, avec une notification.</li>
         <li><strong>Changer la qualité ne touche que les fichiers suivants.</strong> <span class="chip todo">à confirmer</span> Le menu d'un fichier propose « Sauvegarder en Original » tant que l'original est encore sur le téléphone : le fichier est alors renvoyé en entier.</li>
         <li><strong>En tâche de fond.</strong> WorkManager d'Android (contraintes : réseau non facturé, charge) réveille le service de premier plan qui existe déjà pour les envois (<code>SafeboxTransferService</code>). Un passage a aussi lieu au démarrage de l'application et au retour du Wi-Fi. La reprise par blocs de la section 04 s'applique telle quelle.</li>
@@ -346,7 +346,7 @@
       </ul>
       <div class="callout">
         <div class="lbl">Limites connues</div>
-        <p><strong>Google Play.</strong> Lire toute la galerie demande une justification dans la console (règle sur les autorisations photos et vidéos). Une sauvegarde de galerie est un usage défendable, mais l'acceptation n'est pas garantie. L'application ne déclare aujourd'hui aucune de ces autorisations : elle passe par le sélecteur du système.</p>
+        <p><strong>Google Play.</strong> Lire toute la galerie demande une justification dans la console (règle sur les autorisations photos et vidéos). Une sauvegarde de galerie est un usage défendable, mais l'acceptation n'est pas garantie. Depuis le lot 10, l'application déclare ces autorisations ; la déclaration à faire dans la console (Contenu de l'application › Autorisations photos et vidéos) peut reprendre ce texte : « Alanya propose un coffre-fort chiffré avec sauvegarde automatique, comme une application de sauvegarde de galerie : une fois activée par l'utilisateur, elle copie en continu ses photos et vidéos des dossiers qu'il a choisis, sans action de sa part, puis lui permet de libérer la mémoire du téléphone. Le sélecteur de photos du système ne convient pas : il ne donne accès qu'aux fichiers choisis un par un, alors que la sauvegarde doit voir les nouvelles photos au fur et à mesure. »</p>
         <p><strong>Documents.</strong> Depuis Android 11, aucune autorisation simple ne donne accès à tous les PDF du téléphone. L'autorisation « Accès à tous les fichiers » existe, mais Google la réserve à quelques catégories d'applications. D'où les dossiers choisis.</p>
         <p><strong>iOS.</strong> Seules les photos et vidéos peuvent se sauvegarder (PhotoKit), avec un fonctionnement en arrière-plan très limité. Rien n'a pu être essayé sans Mac.</p>
         <p><strong>Batterie et temps.</strong> La compression se fait sur le téléphone. Un historique de 17 Go de vidéos demande plusieurs heures de calcul, d'où l'option « pendant la charge ». En Original, rien à compresser, mais plus de données à envoyer.</p>
@@ -480,7 +480,14 @@
         <p>MEGA, ou quelqu'un qui volerait les clés du bucket, ne peut rien lire. Alanya, en revanche, peut techniquement déchiffrer un fichier, puisque le serveur garde les clés. C'est le même choix que pour la sauvegarde sur Drive. La politique de confidentialité doit le dire en ces termes et ne pas parler de chiffrement de bout en bout.</p>
         <p>Un coffre dont seul l'inscrit aurait la clé est possible plus tard, mais un téléphone perdu sans code de récupération ferait perdre tout le coffre. Décision du 15/10 : le serveur garde les clés.</p>
       </div>
-      <p>Perdre <code>SAFEBOX_KEY</code> rend tous les coffres illisibles. Elle doit être sauvegardée hors du serveur, avec les autres secrets, et ne jamais changer sans un script qui rechiffre les clés des fichiers.</p>
+      <p>Perdre <code>SAFEBOX_KEY</code> rend tous les coffres illisibles. Elle doit être sauvegardée hors du serveur, avec les autres secrets.</p>
+      <p><strong>Le trousseau (30/10/2026).</strong> Les clés maîtresses sont numérotées pour pouvoir en changer (fuite, départ d'un administrateur) sans perdre de coffre :</p>
+      <ul>
+        <li>Une clé de fichier rangée en base porte le numéro de sa clé maîtresse (format <code>SK2</code>) ; les anciennes, au format <code>SK1</code>, sont sous la n° 1 et restent lisibles.</li>
+        <li>La clé en service : <code>SAFEBOX_KEY</code>, ou mieux <code>SAFEBOX_KEY_FILE</code>, le chemin d'un fichier lisible du seul compte du serveur (<code>chmod 600</code>), hors du <code>.env</code> ; son numéro : <code>SAFEBOX_KEY_ID</code> (1 par défaut). Une ancienne clé reste en <code>SAFEBOX_KEY_&lt;n&gt;</code> ou <code>SAFEBOX_KEY_&lt;n&gt;_FILE</code>.</li>
+        <li>Changer de clé : la créer et la sauvegarder hors du serveur, la poser comme clé en service avec le numéro suivant, garder l'ancienne au trousseau, redémarrer, puis <code>scripts/maintenance/safebox-rechiffrer-cles.js</code> (simulation, puis <code>--apply</code>). Rien ne change chez MEGA.</li>
+        <li>Les empreintes (noms des comptes chez MEGA, originaux de la sauvegarde automatique) restent calculées sous la clé n° 1, qui reste donc au trousseau. Après une fuite seulement, on la retire : la sauvegarde automatique renvoie alors tout une fois.</li>
+      </ul>
     </div>
   </section>
 
@@ -550,7 +557,7 @@
             <tr><td>Photo</td><td>La photo elle-même, nette, environ 480 px</td></tr>
             <tr><td>Vidéo</td><td>Une image de la vidéo, sa durée et sa définition</td></tr>
             <tr><td>PDF</td><td>La première page et le nombre de pages</td></tr>
-            <tr><td>Audio</td><td>La pochette si le fichier en a une, sinon une icône ; titre, artiste et durée</td></tr>
+            <tr><td>Audio</td><td>La pochette si le fichier en a une (réduite à 480 px en JPEG, comme une photo, depuis le 31/10), sinon une icône ; titre, artiste et durée</td></tr>
             <tr><td>Autres documents</td><td>Une icône du type avec l'extension</td></tr>
             <tr><td>Album ou sélection</td><td>Les quatre premiers aperçus en mosaïque et le nombre restant</td></tr>
           </tbody>
@@ -584,9 +591,9 @@
         <table class="tbl-prose">
           <thead><tr><th>Écran</th><th>Contenu</th></tr></thead>
           <tbody>
-            <tr><td>Accueil</td><td>Réunit les versions A et B, sans le bouton « Ajouter des fichiers » du bas de A. De haut en bas : la carte d'espace ; l'état de la sauvegarde (« 32 fichiers en attente de Wi-Fi » avec « Envoyer avec les données mobiles », ou « Tous vos fichiers sont en sécurité ») ; la carte « Mémoire du téléphone presque pleine » ; la carte Partager ; Mes dossiers (Photos, Vidéos, Audio, Documents) ; Albums récents ; la corbeille ; un bouton rond « + ». En haut, la recherche et les réglages.</td></tr>
-            <tr><td>Barre du bas</td><td>Accueil · Fichiers · Partager · Transferts, avec le nombre de transferts en attente sur l'onglet.</td></tr>
-            <tr><td>Fichiers</td><td>Les six dossiers. Pas encore dessiné : reprend les tuiles de l'accueil.</td></tr>
+            <tr><td>Accueil</td><td>Un seul écran depuis le 30/10. De haut en bas : la carte d'espace ; une carte d'état qui réunit les envois (elle ouvre les transferts) et la sauvegarde automatique (« 32 fichiers en attente de Wi-Fi » avec « Envoyer avec les données mobiles », ou « À jour ») ; la carte « Libérer la mémoire du téléphone » quand elle est presque pleine ; Mes dossiers (les six, Partager compris) ; Albums récents (les trois derniers remplis, sur une ligne, quatre aperçus chacun, photos et vidéos d'abord, en une seule demande au serveur ; « + » pour en créer un, « Tout voir » pour les autres) ; Libérer de l'espace et la corbeille ; un bouton rond « + ». En haut, les transferts.</td></tr>
+            <tr><td>Barre du bas</td><td>Retirée le 30/10 : les transferts s'ouvrent depuis la carte d'état et l'icône de la barre du haut (avec le nombre en cours) ; Partager, comme les autres dossiers.</td></tr>
+            <tr><td>Fichiers</td><td>Retiré le 30/10 : les six dossiers sont sur l'accueil.</td></tr>
             <tr><td>Photos, Vidéos, Audio, Documents</td><td>Par jour, filtres par dossier du téléphone, pastille sur les fichiers en attente. Pas de bouton « Ajouter » dans Photos, qui se remplit seul.</td></tr>
             <tr><td>Album</td><td>Une grille de tous les types : vignette des photos, durée des vidéos, première page ou icône des documents, titre et durée des audios. Filtres par type, bouton « Ajouter ».</td></tr>
             <tr><td>Sélection</td><td>Barre du haut « 5 sélectionnées · Tout », barre du bas Télécharger · Envoyer · Déplacer · Supprimer, avec le nombre et la taille.</td></tr>
@@ -662,7 +669,7 @@
       </ul>
       <h3>Ce qui pousse vers Alanya Plus</h3>
       <ul class="plain">
-        <li>La sauvegarde automatique, qui remplit l'espace puis s'arrête avec l'offre quand il est plein.</li>
+        <li>La sauvegarde automatique, qui remplit l'espace avec les plus récents puis propose l'offre pour ce qui ne tient plus.</li>
         <li>Original présélectionné quand tout tient, et pour les ajouts à la main.</li>
         <li>Le dossier Partager, gardé sur l'espace de l'expéditeur jusqu'à ce qu'il le vide.</li>
         <li>« Garder dans mon coffre », qui consomme l'espace du destinataire.</li>
@@ -701,9 +708,10 @@
 <span class="k">safebox_share_item</span>   share_id, position, file_id, name, mime, family, plain_bytes
                      <span class="c">(un partage porte un album ou une sélection, 500 éléments au plus)</span>
 
-<span class="c">-- À ajouter (lot 10)</span>
-<span class="k">safebox_blob</span>         + source_fp : empreinte de l'original, liée au compte (HMAC), pour les doublons
-<span class="k">safebox_backup_skip</span>  alanyaID, source_fp, created_at   <span class="c">(« ne plus sauvegarder »)</span>
+<span class="c">-- Lot 10, migration 111_safebox_sauvegarde_auto.sql (codé le 26/10, à appliquer AVANT le déploiement : ajouts seulement)</span>
+<span class="k">safebox_blob</span>         + source_fp : empreinte de l'original, liée au compte (HMAC), pour les doublons ; index (alanyaID, source_fp)
+<span class="k">safebox_backup_skip</span>  alanyaID, source_fp, created_at   <span class="c">(« ne plus sauvegarder » : posé à la corbeille quand le contenu
+                     n'est plus nulle part dans le coffre, retiré à la restauration)</span>
 
 <span class="c">-- Routes du lot 6, préfixe /api/safebox (codées)</span>
 POST   /folders/:id/files        ajouter des fichiers du coffre à un album, sans copie (100 au plus)
@@ -720,8 +728,10 @@ GET    /shares/received          onglet Reçus
 GET    /shares/:id/recipients    suivi chez l'expéditeur
 POST   /shares/:id/revoke        retirer le partage (expéditeur)
 
-<span class="c">-- Routes à ajouter (lot 10), préfixe /api/safebox</span>
-POST   /backup/check             empreintes → déjà sauvegardées / à ne plus sauvegarder / à envoyer
+<span class="c">-- Routes du lot 10, préfixe /api/safebox (codées)</span>
+POST   /uploads                  + sourceFp : empreinte de l'original (64 caractères hexadécimaux)
+POST   /backup/check             { fps (500 au plus), link } → saved | elsewhere | uploading | skip | new
+                                 <span class="c">(link : un contenu seulement dans un album rejoint le dossier de son type, sans copie)</span>
 POST   /backup/skip              ajouter des empreintes à « ne plus sauvegarder »</pre>
       <p><strong>Client web</strong> : S4 ne gère pas le CORS, un navigateur ne peut ni envoyer ni télécharger directement chez MEGA. Le coffre reste dans l'application mobile ; une version web est prévue plus tard, et la carte y affichera « À ouvrir dans l'application mobile ».</p>
     </div>
@@ -751,8 +761,8 @@ POST   /backup/skip              ajouter des empreintes à « ne plus sauvegarde
         <li><div class="step"><p><strong>Lot 7 · trois formats de compression</strong> <span class="chip ok">codé le 26/10</span></p><p class="sub">Application : <code>SafeboxQuality</code> (Original, HD, Compressé) et ses règles, 480p et 720p en H.265 avec repli H.264, photo HD à 2 560 px, musique à 128 ou 64 kbit/s, H.265 seulement si ce téléphone l'encode et que les destinataires le lisent (H.264 dans Partager sans destinataire connu), estimation des trois poids, format grisé au-delà de 1 Go avec le fichier en cause, nouvelle feuille « Qualité d'envoi », avertissement avant d'envoyer une vidéo H.265 à une discussion qui ne la lit pas ; un fichier trop lourd tel quel n'est plus refusé d'emblée s'il se compresse. Serveur : <code>quality</code> à l'envoi et dans les listes, <code>codec</code> dans les détails (pas de migration). Tests : serveur 63 et 29/29, application 69 tests du coffre. Pas encore : « Envoyer seulement en Wi-Fi » (lot 10).</p></div></li>
         <li><div class="step"><p><strong>Lot 8 · la nouvelle interface</strong> <span class="chip ok">codé le 26/10</span></p><p class="sub">Application seulement (pas de changement serveur). Accueil A + B : carte Espace (formule, barre répartie par dossier, légende, libre, « Passer à Plus », dépassement), carte d'état des envois (en échec, en attente de réseau, en cours, en pause, tout est à l'abri), carte Partager, six dossiers, albums récents en mosaïque avec « Nouvel album », Libérer de l'espace et Corbeille, bouton « Ajouter » qui demande le dossier puis ouvre le choix des fichiers. Barre du bas Accueil · Fichiers · Partager · Transferts (pastille du nombre de transferts actifs). Photos et Vidéos groupées par jour (Aujourd'hui, Hier, date), Albums en grille tous types avec filtres par type, autres dossiers en liste. Sélection par appui long : Tout sélectionner, barre Télécharger, Envoyer, Album, Déplacer, Supprimer (une seule question « ici ou partout »). Feuille Télécharger : la sélection ou tout le dossier, vers la galerie (album « Alanya ») ou en ZIP dans Téléchargements/Alanya, une tâche à la fois, fichiers perdus passés. Écran Transferts : onglets Envois (mettre en pause, reprendre, tout mettre en pause, réessayer, annuler ; En cours et Terminés avec le format) et Téléchargements (progression, annulation). 56 textes en fr, en, zh. Tests : application 87 tests du coffre, dont l'affichage de l'accueil et d'un dossier sur un faux serveur. Reportés au lot 10 : « Envoyer seulement en Wi-Fi », carte mémoire du téléphone, filtres de Photos par dossier d'origine du téléphone.</p></div></li>
         <li><div class="step"><p><strong>Lot 9 · Partager et la carte dans les discussions</strong> <span class="chip ok">codé le 26/10</span></p><p class="sub">Backend : migration <code>109_safebox_partage_lots.sql</code> (à appliquer avant le déploiement), un album ou une sélection en un seul partage (500 éléments au plus), éléments par pages, téléchargement par élément compté une fois par partage et par 2 heures, « Garder » d'un lot en album (« Kribi 2026 (2) » si le nom est pris, l'espace ne compte que les contenus nouveaux), Reçus, suivi (gardé, téléchargé, pas encore), retrait par l'expéditeur, badge « envoyé » qui compte les lots et donne la dernière discussion, modération d'un lot (aperçu, retrait et suppression de tous ses contenus) ; message de type 11 avec titre, nombre, types et mosaïque floue, lisible par les anciennes applications (« Mettez à jour Alanya » au téléchargement d'un lot). Tests : serveur 66 et 34/34 étapes d'intégration. Application : nouvelle carte (« Ouvrir », « Voir l'album » avec mosaïque et « +38 », « Téléchargé par 2 sur 7 » et « Voir le suivi » chez l'expéditeur), écrans du fichier et de l'album reçus (filtres, « Garder dans mon coffre », « Tout télécharger » en galerie ou ZIP), suivi (« Envoyer ailleurs », « Retirer le partage »), dossier Partager à deux onglets (Mes envois avec l'état de chaque fichier et « téléchargés par tous · à libérer », Reçus), sélection et album envoyés en une seule carte, plusieurs fichiers du téléphone partis en un seul message à la fin du dernier envoi, carte « Envoi vers le coffre-fort · 62 % » avec « Annuler » dans la discussion ; 53 textes en fr, en, zh. Tests : application 100 tests du coffre.</p></div></li>
-        <li><div class="step"><p><strong>Lot 10 · la sauvegarde automatique</strong> <span class="chip todo">à faire</span></p><p class="sub">Application : autorisations Android, écrans d'activation, lecture de la galerie et des dossiers choisis, empreintes et doublons, tâche de fond (WorkManager, Wi-Fi, charge), arrêt quand l'espace est plein, « Libérer la mémoire du téléphone ». Backend : empreintes et « ne plus sauvegarder ». Déclaration des autorisations dans la console Google Play.</p></div></li>
-        <li><div class="step"><p><strong>Lot 11 · essais et mise en service</strong> <span class="chip todo">à faire</span></p><p class="sub">Appliquer les migrations en production, déployer le backend, installer l'APK, puis essayer sur deux téléphones tout ce qui précède, avec les essais restés en attente des lots 3 à 5. Fusion dans <code>main</code> et publication.</p></div></li>
+        <li><div class="step"><p><strong>Lot 10 · la sauvegarde automatique</strong> <span class="chip ok">codé le 26/10</span></p><p class="sub">Backend : migration <code>111_safebox_sauvegarde_auto.sql</code> (à appliquer avant le déploiement), empreinte de l'original liée au compte (HMAC) gardée sur le blob, <code>POST /backup/check</code> et <code>/backup/skip</code>, « ne plus sauvegarder » posé à la corbeille (fichier ou dossier) et retiré à la restauration, dossier d'origine du téléphone (<code>meta.source</code>). Tests : serveur 68 et 35/35. Application : plugins gratuits <code>photo_manager</code> (galerie par dossier, original avec sa localisation, retrait du téléphone) et <code>workmanager</code> (passage de fond toutes les heures environ) ; dossiers de documents par le sélecteur d'Android (<code>SafeboxDocumentFolders.kt</code>) ; autorisations READ_MEDIA_IMAGES, _VIDEO, _AUDIO, _VISUAL_USER_SELECTED et ACCESS_MEDIA_LOCATION ; écrans d'activation (autorisation, « Que sauvegarder ? », « Qualité » avec l'estimation et la présélection Original ou HD), qui servent ensuite de réglages ; empreinte de l'original (256 premiers et 256 derniers Kio, sous SHA-256), aussi pour les ajouts à la main ; moteur de sauvegarde (doublons, « ne plus sauvegarder », vidéo de plus de 1 Go en HD, compression seulement pendant la charge, arrêt quand l'espace est plein) ; envois « Seulement en Wi-Fi » qui attendent le Wi-Fi, et « Envoyer avec les données mobiles » ; carte de l'accueil (à jour, en route, en attente de Wi-Fi ou de la charge, espace plein, accès refusé ou limité) ; « Libérer la mémoire du téléphone » quand elle est presque pleine (moins de 15 % ou 2 Go libres), seulement pour ce qui est en Original ; filtres de Photos et Vidéos par dossier d'origine ; l'application ouverte et la tâche de fond n'envoient jamais en même temps (présence notée chaque minute). 59 textes en fr, en, zh. Tests : application 115 tests du coffre. Limites : la tâche de fond ne lit pas les dossiers de documents (ils passent quand l'application est ouverte) ; rien n'a été essayé sur un téléphone ; iOS pas fait.</p></div></li>
+        <li><div class="step"><p><strong>Lot 11 · essais et mise en service</strong> <span class="chip todo">en cours</span></p><p class="sub">Appliquer les migrations en production, déployer le backend, installer l'APK, puis essayer sur deux téléphones tout ce qui précède, avec les essais restés en attente des lots 3 à 5. Fusion dans main et publication. Fait le 28/10 : lots 6, 7 et 9 en production avec les migrations 108 et 109 ; migration du lot 10 renumérotée <code>111_safebox_sauvegarde_auto.sql</code> (la 110 est celle des documents sensibles) ; fusions d'essai avec <code>main</code> (serveur sans conflit, 16 suites de la CI vertes ; application : 9 conflits résolus, 2 324 tests verts, les 4 échecs des stickers existent déjà sur <code>main</code>). Signature : la clé commune (<code>key.properties</code>) et celle de la CI coexistent en attendant une décision d'équipe avant la publication.</p></div></li>
       </ol>
       <p>L'ordre suit les dépendances : les six dossiers d'abord, puisque tout le reste s'y range ; la sauvegarde automatique en dernier, parce qu'elle s'appuie sur les dossiers, la compression et l'interface.</p>
     </div>
@@ -775,7 +785,7 @@ POST   /backup/skip              ajouter des empreintes à « ne plus sauvegarde
             <tr><td>Fichier à plusieurs endroits (24/10)</td><td>Pas de copie, compté une fois ; endroits indépendants ; place libérée quand il n'est plus nulle part.</td></tr>
             <tr><td>Dossier Partager (24/10)</td><td>Tous les types, gardé jusqu'à suppression par l'expéditeur, onglets Mes envois et Reçus.</td></tr>
             <tr><td>Carte dans la discussion (24/10)</td><td>Un bouton qui ouvre un écran dans Alanya, pas de lien ; un album en une seule carte ; pas de durée de validité.</td></tr>
-            <tr><td>Interface (24/10)</td><td>Accueil A + B sans le bouton du bas de A ; barre Accueil · Fichiers · Partager · Transferts.</td></tr>
+            <tr><td>Interface (24/10, 30/10)</td><td>Accueil A + B sans le bouton du bas de A. Le 30/10 : un seul écran, sans barre du bas (Fichiers, Partager et Transferts répétaient l'accueil).</td></tr>
             <tr><td>Fin d'Alanya Plus (15/10)</td><td>30 jours : lecture seule, puis suppression de ce qui dépasse 10 Go.</td></tr>
             <tr><td>Clés de chiffrement (15/10)</td><td>Gardées par le serveur.</td></tr>
             <tr><td>Gros fichiers (15/10)</td><td>1 Go pour tous, 3 téléchargements par destinataire et par 24 heures.</td></tr>
@@ -796,7 +806,7 @@ POST   /backup/skip              ajouter des empreintes à « ne plus sauvegarde
         <div>
           <h3>Commentaire d'une photo à deux endroits</h3>
           <p>Une photo dans Photos et dans un album : un commentaire ou deux ?</p>
-          <p class="reco">Proposé : un seul, qui suit la photo.</p>
+          <p class="reco">Décidé le 31/10 : un seul, qui suit la photo.</p>
         </div>
         <div>
           <h3>« Sauvegarder en Original »</h3>

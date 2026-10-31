@@ -34,6 +34,7 @@ const moi = (req) => req.user.alanyaID;
 
 exports.overview = route('overview', (s, req) => s.overview(moi(req)));
 exports.listFolder = route('listFolder', (s, req) => s.listFolder(moi(req), req.params.id, { cursor: req.query.cursor }));
+exports.recentAlbums = route('recentAlbums', (s, req) => s.recentAlbums(moi(req), { limit: req.query.limit }));
 exports.createFolder = route('createFolder', (s, req) => s.createFolder(moi(req), req.body), 201);
 exports.updateFolder = route('updateFolder', (s, req) => s.updateFolder(moi(req), req.params.id, req.body));
 exports.trashFolder = route('trashFolder', (s, req) => s.trashFolder(moi(req), req.params.id));
@@ -58,6 +59,8 @@ exports.saveShare = route('saveShare', (s, req) => s.saveShare(moi(req), req.par
 exports.receivedShares = route('receivedShares', (s, req) => s.receivedShares(moi(req), { cursor: req.query.cursor }));
 exports.shareRecipients = route('shareRecipients', (s, req) => s.shareRecipients(moi(req), req.params.id));
 exports.revokeShare = route('revokeShare', (s, req) => s.revokeShare(moi(req), req.params.id));
+exports.backupCheck = route('backupCheck', (s, req) => s.backupCheck(moi(req), req.body));
+exports.backupSkip = route('backupSkip', (s, req) => s.backupSkip(moi(req), req.body));
 exports.largestFiles = route('largestFiles', (s, req) => s.largestFiles(moi(req), { limit: req.query.limit }));
 
 exports.reserveUpload = route('reserveUpload', (s, req) => s.reserveUpload(moi(req), req.body), 201);

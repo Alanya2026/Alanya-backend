@@ -20,7 +20,7 @@ const pool = require('../../config/db');
 const C = require('../../constants/safebox');
 const R = require('./rules');
 const { SafeboxError } = require('./errors');
-const { keyConfigured, wrapFileKey, unwrapFileKey, accountTag } = require('./keys');
+const { keyConfigured, wrapFileKey, unwrapFileKey, accountTag, sourceFingerprint } = require('./keys');
 const { defaultStorage } = require('./storage');
 const { getSafeboxSettings } = require('./settings');
 const { collectOrphans } = require('./purge');
@@ -346,6 +346,10 @@ function createSafeboxService({
   /**
    * Commentaires des photos (migration 107), pour leur propriétaire seulement :
    * texte, et audio prêt avec son adresse signée et sa clé.
+   *
+   * Un commentaire suit la photo, pas l'exemplaire (31/10/2026) : rangé sur
+   * un seul exemplaire (son porteur), il se montre sur tous ceux du même
+   * contenu dans le coffre — Photos et albums.
    */
   async function notesDe(storage, fileIds) {
     const ids = [...new Set(fileIds.map(Number).filter(Boolean))];
@@ -353,12 +357,22 @@ function createSafeboxService({
     if (!ids.length) return out;
     let rows;
     try {
-      [rows] = await db.query('SELECT * FROM safebox_note WHERE file_id IN (?)', [ids]);
+      [rows] = await db.query(
+        `SELECT f.id AS pour, n.*
+           FROM safebox_file f
+           JOIN safebox_file x ON x.alanyaID = f.alanyaID AND x.blob_id = f.blob_id
+           JOIN safebox_note n ON n.file_id = x.id
+          WHERE f.id IN (?)
+          ORDER BY f.id, x.trashed_at IS NULL DESC, n.updated_at DESC`,
+        [ids],
+      );
     } catch (e) {
       if (e.code === 'ER_NO_SUCH_TABLE') return out;
       throw e;
     }
-    for (const n of rows) out.set(Number(n.file_id), await noteShape(storage, n));
+    for (const n of rows) {
+      if (!out.has(Number(n.pour))) out.set(Number(n.pour), await noteShape(storage, n));
+    }
     return out;
   }
 
@@ -467,11 +481,58 @@ function createSafeboxService({
     return out;
   }
 
-  const FICHIER = `SELECT f.id, f.folder_id, f.name, f.ext, f.mime, f.family, f.original_bytes,
+  const COLONNES_FICHIER = `f.id, f.folder_id, f.name, f.ext, f.mime, f.family, f.original_bytes,
                           f.compressed, f.trashed_at, f.trashed_by_folder, f.created_at, f.updated_at,
                           b.id AS blob_id, b.prefix, b.block_size, b.block_count, b.stored_bytes,
-                          b.plain_bytes, b.preview_bytes, b.cipher_format, b.wrapped_key, b.status
-                     FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id`;
+                          b.plain_bytes, b.preview_bytes, b.cipher_format, b.wrapped_key, b.status`;
+  const FICHIER = `SELECT ${COLONNES_FICHIER} FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id`;
+
+  /**
+   * `GET /api/safebox/albums/recent` — les albums de l'accueil en une seule
+   * demande (30/10/2026) : les derniers remplis (dernier ajout, sinon
+   * création), leur nombre de fichiers et quatre fichiers de couverture,
+   * photos et vidéos d'abord. Seules ces couvertures portent leur clé.
+   */
+  async function recentAlbums(alanyaID, { limit } = {}) {
+    const storage = ready();
+    const n = Math.min(Math.max(R.parseId(limit) ?? 3, 1), 12);
+    const racine = (await ensureAccount(alanyaID)).albums;
+    if (!racine) return { albums: [] };
+    const [albums] = await db.query(
+      `SELECT fo.id, fo.parent_id, fo.root, fo.name, fo.depth, fo.created_at, fo.updated_at,
+              COUNT(f.id) AS fichiers, MAX(f.created_at) AS dernier_ajout
+         FROM safebox_folder fo
+         LEFT JOIN (SELECT f.id, f.folder_id, f.created_at
+                      FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+                     WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready') f
+                ON f.folder_id = fo.id
+        WHERE fo.parent_id = ? AND fo.alanyaID = ? AND fo.trashed_at IS NULL
+        GROUP BY fo.id
+        ORDER BY COALESCE(dernier_ajout, fo.created_at) DESC, fo.id DESC
+        LIMIT ${n}`,
+      [alanyaID, racine.id, alanyaID],
+    );
+    if (!albums.length) return { albums: [] };
+    const [couvertures] = await db.query(
+      `SELECT * FROM (
+         SELECT ${COLONNES_FICHIER},
+                ROW_NUMBER() OVER (PARTITION BY f.folder_id
+                                   ORDER BY f.family IN ('photos', 'videos') DESC, f.id DESC) AS rang
+           FROM safebox_file f JOIN safebox_blob b ON b.id = f.blob_id
+          WHERE f.folder_id IN (?) AND f.alanyaID = ? AND f.trashed_at IS NULL AND b.status = 'ready'
+       ) x WHERE x.rang <= 4 ORDER BY x.folder_id, x.rang`,
+      [albums.map((a) => a.id), alanyaID],
+    );
+    const formes = await Promise.all((await enrichir(couvertures)).map((f) => fileShape(f, storage)));
+    return {
+      albums: albums.map((a) => ({
+        ...folderShape(a),
+        fileCount: Number(a.fichiers),
+        lastAddedAt: a.dernier_ajout ?? null,
+        cover: formes.filter((f) => f.folderId === Number(a.id)),
+      })),
+    };
+  }
 
   /** `GET /api/safebox/folders/:id` — sous-dossiers, puis fichiers par pages. */
   async function listFolder(alanyaID, folderId, { cursor } = {}) {
@@ -633,6 +694,12 @@ function createSafeboxService({
           WHERE f.alanyaID = ? AND fo.path LIKE CONCAT(?, '%') AND f.trashed_at IS NULL`,
         [d.id, alanyaID, d.path],
       );
+      const [jetes] = await conn.query(
+        'SELECT DISTINCT blob_id FROM safebox_file WHERE trashed_by_folder = ? AND alanyaID = ?',
+        [d.id, alanyaID],
+      );
+      await retenirSuppression(conn, alanyaID, jetes.map((x) => x.blob_id));
+      await relogerNotes(conn, alanyaID, jetes.map((x) => x.blob_id));
       await conn.query(
         'UPDATE safebox_folder SET trashed_at = NOW(), trashed_by_folder = NULL WHERE id = ?',
         [d.id],
@@ -681,10 +748,16 @@ function createSafeboxService({
         'UPDATE safebox_folder SET trashed_at = NULL, trashed_by_folder = NULL WHERE trashed_by_folder = ? AND alanyaID = ?',
         [d.id, alanyaID],
       );
+      const [revenus] = await conn.query(
+        'SELECT DISTINCT blob_id FROM safebox_file WHERE trashed_by_folder = ? AND alanyaID = ?',
+        [d.id, alanyaID],
+      );
       await conn.query(
         'UPDATE safebox_file SET trashed_at = NULL, trashed_by_folder = NULL WHERE trashed_by_folder = ? AND alanyaID = ?',
         [d.id, alanyaID],
       );
+      await oublierSuppression(conn, alanyaID, revenus.map((x) => x.blob_id));
+      await relogerNotes(conn, alanyaID, revenus.map((x) => x.blob_id));
       await conn.query('UPDATE safebox_folder SET trashed_at = NULL WHERE id = ?', [d.id]);
     });
     const [[f]] = await db.query(
@@ -759,6 +832,8 @@ function createSafeboxService({
         'UPDATE safebox_file SET trashed_at = NOW(), trashed_by_folder = NULL WHERE id = ? AND alanyaID = ? AND trashed_at IS NULL',
         [f.id, alanyaID],
       );
+    await retenirSuppression(db, alanyaID, [f.blob_id]);
+    await relogerNotes(db, alanyaID, [f.blob_id]);
     return { ok: true, trashed: r.affectedRows };
   }
 
@@ -772,7 +847,7 @@ function createSafeboxService({
     const id = R.parseId(fileId);
     if (!id) throw introuvable();
     const [[f]] = await db.query(
-      `SELECT f.id, fo.root, fo.trashed_at AS dossier_corbeille
+      `SELECT f.id, f.blob_id, fo.root, fo.trashed_at AS dossier_corbeille
          FROM safebox_file f JOIN safebox_folder fo ON fo.id = f.folder_id
         WHERE f.id = ? AND f.alanyaID = ? AND f.trashed_at IS NOT NULL AND f.trashed_by_folder IS NULL`,
       [id, alanyaID],
@@ -783,6 +858,8 @@ function createSafeboxService({
       `UPDATE safebox_file SET trashed_at = NULL${versRacine} WHERE id = ? AND alanyaID = ?`,
       f.dossier_corbeille ? [racines[f.root].id, id, alanyaID] : [id, alanyaID],
     );
+    await oublierSuppression(db, alanyaID, [f.blob_id]);
+    await relogerNotes(db, alanyaID, [f.blob_id]);
     return fileShape(await liveFile(db, alanyaID, id), storage);
   }
 
@@ -917,13 +994,67 @@ function createSafeboxService({
     return f;
   }
 
+  /**
+   * Le porteur du commentaire d'une photo : l'exemplaire du même contenu qui
+   * le range (un vivant d'abord), sinon cette photo elle-même.
+   */
+  async function porteur(conn, alanyaID, f) {
+    await relogerNotes(conn, alanyaID, [f.blob_id]);
+    const [[p]] = await conn.query(
+      `SELECT n.file_id FROM safebox_note n JOIN safebox_file x ON x.id = n.file_id
+        WHERE x.alanyaID = ? AND x.blob_id = ?
+        ORDER BY x.trashed_at IS NULL DESC, n.updated_at DESC LIMIT 1`,
+      [alanyaID, f.blob_id],
+    );
+    return p ? Number(p.file_id) : Number(f.id);
+  }
+
+  /**
+   * Après une corbeille ou une restauration : un commentaire porté par un
+   * exemplaire à la corbeille passe sur un exemplaire vivant du même contenu,
+   * s'il y en a un. Il ne part ainsi qu'avec le dernier exemplaire. La clé
+   * de son audio, liée à l'exemplaire, est rechiffrée pour le nouveau.
+   */
+  async function relogerNotes(conn, alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    if (!ids.length) return;
+    let jetees;
+    try {
+      [jetees] = await conn.query(
+        `SELECT n.file_id, n.audio_wrapped_key, f.blob_id
+           FROM safebox_note n JOIN safebox_file f ON f.id = n.file_id
+          WHERE f.alanyaID = ? AND f.blob_id IN (?) AND f.trashed_at IS NOT NULL`,
+        [alanyaID, ids],
+      );
+    } catch (e) {
+      if (e.code === 'ER_NO_SUCH_TABLE') return;
+      throw e;
+    }
+    for (const n of jetees) {
+      const [vivants] = await conn.query(
+        `SELECT x.id, m.file_id AS a_sa_note FROM safebox_file x LEFT JOIN safebox_note m ON m.file_id = x.id
+          WHERE x.alanyaID = ? AND x.blob_id = ? AND x.trashed_at IS NULL ORDER BY x.id`,
+        [alanyaID, n.blob_id],
+      );
+      // Pas d'exemplaire vivant, ou un vivant a déjà le sien : rien à déplacer.
+      if (!vivants.length || vivants.some((v) => v.a_sa_note != null)) continue;
+      const cible = Number(vivants[0].id);
+      const cle = n.audio_wrapped_key
+        ? wrapFileKey(unwrapFileKey(n.audio_wrapped_key, `note-${n.file_id}`, env), `note-${cible}`, env)
+        : null;
+      await conn.query('UPDATE safebox_note SET file_id = ?, audio_wrapped_key = ? WHERE file_id = ?',
+        [cible, cle, n.file_id]);
+    }
+  }
+
   async function lireNote(conn, fileId, verrou = false) {
     const [[n]] = await conn.query(`SELECT * FROM safebox_note WHERE file_id = ?${verrou ? ' FOR UPDATE' : ''}`, [fileId]);
     return n || null;
   }
 
-  async function rendreNote(storage, fileId) {
-    return noteShape(storage, (await lireNote(db, fileId)) || { file_id: fileId });
+  async function rendreNote(storage, alanyaID, f) {
+    const id = await porteur(db, alanyaID, f);
+    return noteShape(storage, (await lireNote(db, id)) || { file_id: id });
   }
 
   /** Efface chez MEGA l'audio remplacé ou supprimé ; à défaut, le rapprochement s'en charge. */
@@ -942,17 +1073,18 @@ function createSafeboxService({
     const f = await photoAMoi(alanyaID, fileId);
     const texte = R.normalizeNoteText(body.text);
     await tx(async (conn) => {
-      const n = await lireNote(conn, f.id, true);
+      const id = await porteur(conn, alanyaID, f);
+      const n = await lireNote(conn, id, true);
       if (!texte && !(n && n.audio_prefix)) {
-        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [f.id]);
+        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [id]);
       } else {
         await conn.query(
           'INSERT INTO safebox_note (file_id, text) VALUES (?, ?) ON DUPLICATE KEY UPDATE text = VALUES(text)',
-          [f.id, texte],
+          [id, texte],
         );
       }
     });
-    return { note: await rendreNote(storage, f.id) };
+    return { note: await rendreNote(storage, alanyaID, f) };
   }
 
   /**
@@ -969,7 +1101,8 @@ function createSafeboxService({
     const prefix = `u/${accountTag(alanyaID, env)}/${crypto.randomUUID()}/`;
     const ancien = await tx(async (conn) => {
       await conn.query('SELECT alanyaID FROM safebox_account WHERE alanyaID = ? FOR UPDATE', [alanyaID]);
-      const n = await lireNote(conn, f.id, true);
+      const id = await porteur(conn, alanyaID, f);
+      const n = await lireNote(conn, id, true);
       const { usedBytes } = await usageOf(conn, alanyaID);
       const libere = n && n.audio_prefix ? Number(n.audio_bytes) || 0 : 0;
       if (!R.fitsQuota({ usedBytes: usedBytes - libere, quotaBytes, addBytes: size })) {
@@ -984,7 +1117,7 @@ function createSafeboxService({
          ON DUPLICATE KEY UPDATE audio_prefix = VALUES(audio_prefix), audio_bytes = VALUES(audio_bytes),
            audio_plain_bytes = VALUES(audio_plain_bytes), audio_duration_ms = VALUES(audio_duration_ms),
            audio_wrapped_key = NULL, audio_status = 'pending', audio_activity_at = NOW()`,
-        [f.id, prefix, size, plainSize, durationMs],
+        [id, prefix, size, plainSize, durationMs],
       );
       return n ? n.audio_prefix : null;
     });
@@ -1001,7 +1134,8 @@ function createSafeboxService({
     const storage = ready();
     const f = await photoAMoi(alanyaID, fileId);
     const cle = R.decodeFileKey(body.key);
-    const n = await lireNote(db, f.id);
+    const id = await porteur(db, alanyaID, f);
+    const n = await lireNote(db, id);
     if (!n || !n.audio_prefix || n.audio_status !== 'pending') throw introuvable();
     const objets = await storage.list(n.audio_prefix);
     const recu = objets.find((o) => o.key === R.blockKey(n.audio_prefix, 1));
@@ -1013,10 +1147,10 @@ function createSafeboxService({
     const [r] = await db.query(
       `UPDATE safebox_note SET audio_wrapped_key = ?, audio_status = 'ready', audio_activity_at = NOW()
         WHERE file_id = ? AND audio_prefix = ? AND audio_status = 'pending'`,
-      [wrapFileKey(cle, `note-${f.id}`, env), f.id, n.audio_prefix],
+      [wrapFileKey(cle, `note-${id}`, env), id, n.audio_prefix],
     );
-    if (!r.affectedRows) throw introuvable(); // remplacé entre-temps
-    return { note: await rendreNote(storage, f.id) };
+    if (!r.affectedRows) throw introuvable(); // remplacé ou déplacé entre-temps
+    return { note: await rendreNote(storage, alanyaID, f) };
   }
 
   /** `DELETE /api/safebox/files/:id/note/audio` — supprime l'audio, garde le texte. */
@@ -1024,22 +1158,23 @@ function createSafeboxService({
     const storage = ready();
     const f = await photoAMoi(alanyaID, fileId);
     const ancien = await tx(async (conn) => {
-      const n = await lireNote(conn, f.id, true);
+      const id = await porteur(conn, alanyaID, f);
+      const n = await lireNote(conn, id, true);
       if (!n || !n.audio_prefix) return null;
       if (n.text) {
         await conn.query(
           `UPDATE safebox_note SET audio_prefix = NULL, audio_bytes = NULL, audio_plain_bytes = NULL,
              audio_duration_ms = NULL, audio_wrapped_key = NULL, audio_status = NULL, audio_activity_at = NULL
            WHERE file_id = ?`,
-          [f.id],
+          [id],
         );
       } else {
-        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [f.id]);
+        await conn.query('DELETE FROM safebox_note WHERE file_id = ?', [id]);
       }
       return n.audio_prefix;
     });
     await effacerAudio(storage, ancien);
-    return { note: await rendreNote(storage, f.id) };
+    return { note: await rendreNote(storage, alanyaID, f) };
   }
 
   // ── Envois ───────────────────────────────────────────────────────────────
@@ -1071,6 +1206,7 @@ function createSafeboxService({
     const tailles = R.validateSizes(body, { maxFileBytes: await maxFileFor(alanyaID, settings) });
     const format = R.validateCipherFormat(body.cipherFormat);
     const mime = typeof body.mime === 'string' && body.mime.length <= 127 ? body.mime : null;
+    const empreinte = R.normalizeSourceFp(body.sourceFp);
     const count = R.blockCount(tailles.size, C.BLOCK_BYTES);
     const prefix = `u/${accountTag(alanyaID, env)}/${crypto.randomUUID()}/`;
     const quotaBytes = await quotaFor(alanyaID, settings);
@@ -1114,6 +1250,14 @@ function createSafeboxService({
         await db.query('UPDATE safebox_blob SET meta = ? WHERE id = ?', [JSON.stringify(meta), blobId]);
       } catch (e) {
         if (e.code !== 'ER_BAD_FIELD_ERROR') throw e; // migration 104 absente : sans détails
+      }
+    }
+    if (empreinte) {
+      try {
+        await db.query('UPDATE safebox_blob SET source_fp = ? WHERE id = ?',
+          [sourceFingerprint(alanyaID, empreinte, env), blobId]);
+      } catch (e) {
+        if (!sansMigration111(e)) throw e;
       }
     }
 
@@ -1327,6 +1471,141 @@ function createSafeboxService({
     const id = R.parseId(folderId);
     if (!id) throw introuvable();
     return supprimerDefinitivement(ready(), alanyaID, { dossierId: id });
+  }
+
+  // ── Sauvegarde automatique (lot 10) ──────────────────────────────────────
+  //
+  // Le téléphone calcule l'empreinte de l'original de chaque fichier ; le
+  // serveur la lie au compte (`sourceFingerprint`) et la garde sur le blob.
+  // Avant d'envoyer, le téléphone demande ce que le coffre a déjà : rien n'est
+  // renvoyé deux fois, et ce que l'inscrit a supprimé du coffre n'y revient
+  // pas (« ne plus sauvegarder », migration 111).
+
+  const sansMigration111 = (e) => e.code === 'ER_NO_SUCH_TABLE' || e.code === 'ER_BAD_FIELD_ERROR';
+
+  /**
+   * Ces contenus viennent de passer à la corbeille : ceux qui ne sont plus
+   * nulle part dans mon coffre ne seront plus sauvegardés.
+   */
+  async function retenirSuppression(conn, alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    if (!ids.length) return;
+    try {
+      await conn.query(
+        `INSERT IGNORE INTO safebox_backup_skip (alanyaID, source_fp)
+         SELECT DISTINCT ?, b.source_fp FROM safebox_blob b
+          WHERE b.id IN (?) AND b.source_fp IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM safebox_file f
+                             WHERE f.blob_id = b.id AND f.alanyaID = ? AND f.trashed_at IS NULL)`,
+        [alanyaID, ids, alanyaID],
+      );
+    } catch (e) {
+      if (!sansMigration111(e)) throw e;
+    }
+  }
+
+  /** Revenus de la corbeille : ils se sauvegardent de nouveau. */
+  async function oublierSuppression(conn, alanyaID, blobIds) {
+    const ids = [...new Set(blobIds.map(Number).filter(Boolean))];
+    if (!ids.length) return;
+    try {
+      await conn.query(
+        `DELETE s FROM safebox_backup_skip s JOIN safebox_blob b ON b.source_fp = s.source_fp
+          WHERE s.alanyaID = ? AND b.id IN (?)`,
+        [alanyaID, ids],
+      );
+    } catch (e) {
+      if (!sansMigration111(e)) throw e;
+    }
+  }
+
+  /**
+   * `POST /api/safebox/backup/check` — pour chaque empreinte d'original
+   * (`fps`), ce que le coffre en a :
+   *   saved     dans le dossier de son type (Photos, Vidéos…), rien à faire ;
+   *   elsewhere seulement ailleurs (un album, Partager) — avec `link`, il est
+   *             ajouté sans copie au dossier de son type et devient `saved` ;
+   *   uploading un envoi est en cours (autre appareil, réinstallation) ;
+   *   skip      supprimé du coffre par l'inscrit : ne plus sauvegarder ;
+   *   new       à envoyer.
+   */
+  async function backupCheck(alanyaID, body = {}) {
+    ready();
+    await assertSixDossiers();
+    const fps = R.sourceFps(body.fps);
+    const racines = await ensureAccount(alanyaID);
+    const parEmpreinte = new Map(fps.map((fp) => [sourceFingerprint(alanyaID, fp, env), fp]));
+    const empreintes = [...parEmpreinte.keys()];
+    const results = Object.fromEntries(fps.map((fp) => [fp, { state: 'new' }]));
+    let fichiers;
+    try {
+      [fichiers] = await db.query(
+        `SELECT f.id, f.family, fo.root, b.id AS blob_id, b.status, b.source_fp
+           FROM safebox_file f
+           JOIN safebox_blob b ON b.id = f.blob_id
+           JOIN safebox_folder fo ON fo.id = f.folder_id
+          WHERE f.alanyaID = ? AND f.trashed_at IS NULL AND b.source_fp IN (?)
+          ORDER BY f.id`,
+        [alanyaID, empreintes],
+      );
+    } catch (e) {
+      if (sansMigration111(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
+      throw e;
+    }
+    const [sautes] = await db.query(
+      'SELECT source_fp FROM safebox_backup_skip WHERE alanyaID = ? AND source_fp IN (?)',
+      [alanyaID, empreintes],
+    );
+    for (const x of sautes) results[parEmpreinte.get(x.source_fp)] = { state: 'skip' };
+    const ailleurs = new Map();
+    for (const f of fichiers) {
+      const fp = parEmpreinte.get(f.source_fp);
+      const r = results[fp];
+      if (f.status !== 'ready') {
+        if (r.state === 'new') results[fp] = { state: 'uploading' };
+      } else if (f.root === f.family) {
+        results[fp] = { state: 'saved', fileId: Number(f.id) };
+      } else if (r.state !== 'saved') {
+        results[fp] = { state: 'elsewhere', fileId: Number(f.id) };
+        ailleurs.set(fp, f);
+      }
+    }
+    if (body.link === true) {
+      for (const [fp, f] of ailleurs) {
+        if (results[fp].state !== 'elsewhere') continue;
+        const fileId = await tx(async (conn) => {
+          // Verrou du blob : voir addToFolder.
+          const [[b]] = await conn.query('SELECT status FROM safebox_blob WHERE id = ? FOR UPDATE', [f.blob_id]);
+          if (!b || b.status !== 'ready') return null;
+          const [[src]] = await conn.query(`${FICHIER} WHERE f.id = ?`, [f.id]);
+          const [r] = await conn.query(
+            `INSERT INTO safebox_file (alanyaID, folder_id, blob_id, name, ext, mime, family, original_bytes, compressed)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [alanyaID, racines[src.family].id, f.blob_id, src.name, src.ext, src.mime, src.family,
+              src.original_bytes, Number(src.compressed)],
+          );
+          return r.insertId;
+        });
+        if (fileId) results[fp] = { state: 'saved', fileId: Number(fileId), linked: true };
+      }
+    }
+    return { results };
+  }
+
+  /** `POST /api/safebox/backup/skip` — « ne plus sauvegarder » ces originaux (`fps`). */
+  async function backupSkip(alanyaID, body = {}) {
+    ready();
+    const fps = R.sourceFps(body.fps);
+    try {
+      await db.query(
+        'INSERT IGNORE INTO safebox_backup_skip (alanyaID, source_fp) VALUES ?',
+        [fps.map((fp) => [alanyaID, sourceFingerprint(alanyaID, fp, env)])],
+      );
+    } catch (e) {
+      if (sansMigration111(e)) throw new SafeboxError('SAFEBOX_UNAVAILABLE', 503, 'Coffre-fort en cours de mise à jour');
+      throw e;
+    }
+    return { ok: true, skipped: fps.length };
   }
 
   // ── Partage entre inscrits (lots 3 et 9) ─────────────────────────────────
@@ -2202,6 +2481,7 @@ function createSafeboxService({
   return {
     overview,
     listFolder,
+    recentAlbums,
     createFolder,
     updateFolder,
     trashFolder,
@@ -2220,6 +2500,8 @@ function createSafeboxService({
     receivedShares,
     shareRecipients,
     revokeShare,
+    backupCheck,
+    backupSkip,
     purgeExcess,
     moderationView,
     moderationRevoke,

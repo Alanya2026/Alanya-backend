@@ -20,7 +20,7 @@
  *     CREATE TABLE scheduler_leases (name VARCHAR(64) PRIMARY KEY);
  *     CREATE TABLE conversation (conversID BIGINT AUTO_INCREMENT PRIMARY KEY);
  *     CREATE TABLE conv_participants (conversID BIGINT, alanyaID INT, PRIMARY KEY (conversID, alanyaID));"
- *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers 109_safebox_partage_lots; do
+ *   for m in 101_safebox 102_safebox_partage 104_safebox_apercu_destinataires 106_safebox_perdus 107_safebox_commentaires 108_safebox_six_dossiers 109_safebox_partage_lots 111_safebox_sauvegarde_auto; do
  *     mysql --no-defaults -h127.0.0.1 -P33071 -uroot -pjetable talky_test < migrations/$m.sql; done
  *   DB_HOST=127.0.0.1 DB_PORT=33071 DB_USER=root DB_PASSWORD=jetable \
  *     DB_NAME=talky_test npm run test:safebox:db
@@ -855,6 +855,76 @@ test('lot 9 : retirer le partage, fichier supprimé dans un lot, modération d\'
   assert.strictEqual((await svc.usageOf(lot9.Mx)).usedBytes, 0, 'les copies gardées partent aussi');
 });
 
+// ── Lot 10 : sauvegarde automatique (migration 111) ───────────────────────
+
+test('sauvegarde automatique : doublons, ajout sans copie à Photos, « ne plus sauvegarder »', async () => {
+  const P = await compte('sauvegarde');
+  const Q = await compte('autre-telephone');
+  const racines = Object.fromEntries((await svc.overview(P)).roots.map((r) => [r.root, r.id]));
+  const fp = (n) => crypto.createHash('sha256').update(`original-${n}`).digest('hex');
+  const deposerAvec = async (qui, folderId, name, empreinte) => {
+    const r = await svc.reserveUpload(qui, {
+      folderId, name, size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: empreinte,
+    });
+    deposer(r);
+    return svc.completeUpload(qui, r.fileId, { key: cle.toString('base64') });
+  };
+  await refuse(svc.reserveUpload(P, { folderId: racines.photos, name: 'x.jpg', size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: 'zz' }), 'SAFEBOX_INVALID_FINGERPRINT');
+
+  // Sauvegardée dans Photos, ajoutée à la main dans un album, envoi en cours.
+  const sauvee = await deposerAvec(P, racines.photos, 'Sauvee.jpg', fp(1));
+  const album = await svc.createFolder(P, { parentId: racines.albums, name: 'Kribi' });
+  const dansAlbum = await deposerAvec(P, album.id, 'Album.jpg', fp(2));
+  await svc.reserveUpload(P, { folderId: racines.videos, name: 'EnCours.mp4', size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: fp(3) });
+
+  const etats = (r) => Object.fromEntries(Object.entries(r.results).map(([k, v]) => [k, v.state]));
+  const avant = await svc.backupCheck(P, { fps: [fp(1), fp(2), fp(3), fp(4)] });
+  assert.deepStrictEqual(etats(avant), { [fp(1)]: 'saved', [fp(2)]: 'elsewhere', [fp(3)]: 'uploading', [fp(4)]: 'new' });
+  assert.strictEqual(avant.results[fp(1)].fileId, sauvee.id);
+
+  // L'empreinte est liée au compte : le même original n'est pas « déjà là » chez un autre.
+  assert.deepStrictEqual(etats(await svc.backupCheck(Q, { fps: [fp(1)] })), { [fp(1)]: 'new' });
+
+  // « link » : la photo de l'album rejoint Photos, sans copie ni espace en plus.
+  const espace = (await svc.usageOf(P)).usedBytes;
+  const lie = await svc.backupCheck(P, { fps: [fp(2)], link: true });
+  assert.strictEqual(lie.results[fp(2)].state, 'saved');
+  assert.strictEqual(lie.results[fp(2)].linked, true);
+  const photos = await svc.listFolder(P, racines.photos);
+  assert.ok(photos.files.some((f) => f.name === 'Album.jpg'), 'dans Photos aussi');
+  assert.strictEqual((await svc.usageOf(P)).usedBytes, espace);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'saved');
+
+  // Supprimée d'un seul endroit : encore là. Supprimée partout : ne plus sauvegarder.
+  const lienPhotos = photos.files.find((f) => f.name === 'Album.jpg');
+  await svc.trashFile(P, dansAlbum.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'saved');
+  await svc.trashFile(P, lienPhotos.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'skip');
+  await svc.emptyTrash(P);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(2)] })).results[fp(2)].state, 'skip', 'même après la corbeille vidée');
+
+  // Restaurée : elle se sauvegarde de nouveau.
+  await svc.trashFile(P, sauvee.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(1)] })).results[fp(1)].state, 'skip');
+  await svc.restoreFile(P, sauvee.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(1)] })).results[fp(1)].state, 'saved');
+
+  // Un dossier mis à la corbeille avec ses photos sauvegardées : pareil, et son retour aussi.
+  const sous = await svc.createFolder(P, { parentId: racines.photos, name: 'Vacances' });
+  await deposerAvec(P, sous.id, 'Plage.jpg', fp(5));
+  await svc.trashFolder(P, sous.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(5)] })).results[fp(5)].state, 'skip');
+  await svc.restoreFolder(P, sous.id);
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(5)] })).results[fp(5)].state, 'saved');
+
+  // « Ne plus sauvegarder » demandé par le téléphone.
+  await svc.backupSkip(P, { fps: [fp(4), fp(4)] });
+  assert.strictEqual((await svc.backupCheck(P, { fps: [fp(4)] })).results[fp(4)].state, 'skip');
+  await refuse(svc.backupCheck(P, { fps: [] }), 'SAFEBOX_INVALID_FINGERPRINT');
+  await refuse(svc.backupSkip(P, { fps: ['x'] }), 'SAFEBOX_INVALID_FINGERPRINT');
+});
+
 // ── Lot 4 : espace Alanya Plus ─────────────────────────────────────────────
 
 test('Alanya Plus : espace et taille de fichier du plan', async () => {
@@ -1087,6 +1157,90 @@ test('commentaire d\'une photo : texte, audio, privé, compté dans l\'espace (m
   await svc.emptyTrash(K);
   const [[parti]] = await pool.query('SELECT COUNT(*) AS n FROM safebox_note WHERE file_id = ?', [photo.id]);
   assert.strictEqual(Number(parti.n), 0);
+});
+
+test('commentaire : un seul par photo, dans Photos comme dans ses albums, et il suit la photo (31/10/2026)', async () => {
+  const [[t]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'safebox_note'`,
+  );
+  if (!Number(t.n)) return;
+  const L = await compte('Lina');
+  const racines = Object.fromEntries((await svc.overview(L)).roots.map((r) => [r.root, r.id]));
+  const photo = await deposerFichier(L, racines.photos, 'Kribi.jpg', 30);
+  const album = await svc.createFolder(L, { parentId: racines.albums, name: 'Kribi' });
+  const { files: [copie] } = await svc.addToFolder(L, album.id, { fileIds: [photo.id] });
+  const noteDans = async (dossier, id) => (await svc.listFolder(L, dossier)).files.find((x) => x.id === id).note;
+  const lignes = async () => (await pool.query(
+    'SELECT n.file_id FROM safebox_note n JOIN safebox_file f ON f.id = n.file_id WHERE f.alanyaID = ?', [L],
+  ))[0].map((r) => Number(r.file_id));
+
+  // Écrit dans Photos, lu dans l'album ; modifié dans l'album, c'est le même.
+  await svc.setNoteText(L, photo.id, { text: 'Avant la pluie' });
+  assert.strictEqual((await noteDans(album.id, copie.id)).text, 'Avant la pluie');
+  await svc.setNoteText(L, copie.id, { text: 'Avant la pluie, avec Paul' });
+  assert.strictEqual((await noteDans(racines.photos, photo.id)).text, 'Avant la pluie, avec Paul');
+  assert.deepStrictEqual(await lignes(), [photo.id], 'une seule ligne, sur le premier exemplaire');
+
+  // Un audio ajouté depuis l'album rejoint le même commentaire.
+  const r = await svc.reserveNoteAudio(L, copie.id, { size: 1000, plainSize: 984, durationMs: 5000 });
+  stockage.objets.set(r.url.replace('https://s4.test/put/', '').replace(/\?size=\d+$/, ''), 1000);
+  await svc.completeNoteAudio(L, copie.id, { key: cle.toString('base64') });
+  assert.strictEqual((await noteDans(racines.photos, photo.id)).audio.durationMs, 5000);
+
+  // La photo de Photos à la corbeille : le commentaire passe sur l'exemplaire de
+  // l'album, audio lisible (clé rechiffrée), rien de compté comme corbeille.
+  await svc.trashFile(L, photo.id);
+  assert.deepStrictEqual(await lignes(), [copie.id]);
+  const deplace = await noteDans(album.id, copie.id);
+  assert.strictEqual(deplace.text, 'Avant la pluie, avec Paul');
+  assert.strictEqual(deplace.audio.key, cle.toString('base64'));
+  assert.strictEqual((await svc.usageOf(L)).trashBytes, 0);
+  // La corbeille vidée, il reste.
+  await svc.emptyTrash(L);
+  assert.strictEqual((await noteDans(album.id, copie.id)).text, 'Avant la pluie, avec Paul');
+
+  // Le dernier exemplaire à la corbeille puis restauré : le commentaire revient avec lui.
+  await svc.trashFile(L, copie.id);
+  await svc.restoreFile(L, copie.id);
+  assert.strictEqual((await noteDans(album.id, copie.id)).text, 'Avant la pluie, avec Paul');
+});
+
+test('albums récents (30/10/2026) : les derniers remplis, leur nombre, quatre couvertures', async () => {
+  const R2 = await compte('Rita');
+  const racines = Object.fromEntries((await svc.overview(R2)).roots.map((r) => [r.root, r.id]));
+  assert.deepStrictEqual((await svc.recentAlbums(R2)).albums, []);
+  const ancien = await svc.createFolder(R2, { parentId: racines.albums, name: 'Ancien' });
+  const plein = await svc.createFolder(R2, { parentId: racines.albums, name: 'Plein' });
+  const vide = await svc.createFolder(R2, { parentId: racines.albums, name: 'Vide' });
+  const sousPhotos = await svc.createFolder(R2, { parentId: racines.photos, name: 'Pas un album' });
+  await deposerFichier(R2, ancien.id, 'a.jpg');
+  const docs = [];
+  for (let i = 0; i < 3; i += 1) docs.push(await deposerFichier(R2, plein.id, `doc${i}.pdf`));
+  const photos = [];
+  for (let i = 0; i < 3; i += 1) photos.push(await deposerFichier(R2, plein.id, `p${i}.jpg`));
+  await deposerFichier(R2, sousPhotos.id, 'x.jpg');
+  // L'ordre suit le dernier ajout, pas la création : « Ancien » vient d'être rempli.
+  await pool.query('UPDATE safebox_folder SET created_at = NOW() - INTERVAL 3 DAY WHERE id IN (?)', [[ancien.id, plein.id]]);
+  await pool.query('UPDATE safebox_folder SET created_at = NOW() - INTERVAL 2 DAY WHERE id = ?', [vide.id]);
+  await pool.query('UPDATE safebox_file SET created_at = NOW() - INTERVAL 1 DAY WHERE folder_id = ?', [plein.id]);
+  const { albums } = await svc.recentAlbums(R2);
+  assert.deepStrictEqual(albums.map((a) => a.name), ['Ancien', 'Plein', 'Vide']);
+  const [a, p, v] = albums;
+  assert.strictEqual(a.fileCount, 1);
+  assert.strictEqual(p.fileCount, 6);
+  assert.strictEqual(v.fileCount, 0);
+  assert.strictEqual(v.lastAddedAt, null);
+  assert.deepStrictEqual(v.cover, []);
+  // Quatre couvertures, photos d'abord (les plus récentes), puis un document ; clé comprise.
+  assert.deepStrictEqual(p.cover.map((f) => f.name), ['p2.jpg', 'p1.jpg', 'p0.jpg', 'doc2.pdf']);
+  assert.ok(p.cover.every((f) => f.key && f.folderId === plein.id));
+  // Une corbeille et un sous-dossier de Photos n'y sont pas.
+  await svc.trashFile(R2, photos[2].id);
+  assert.deepStrictEqual((await svc.recentAlbums(R2)).albums[1].cover.map((f) => f.name), ['p1.jpg', 'p0.jpg', 'doc2.pdf', 'doc1.pdf']);
+  assert.strictEqual((await svc.recentAlbums(R2)).albums[1].fileCount, 5);
+  assert.ok(!(await svc.recentAlbums(R2, { limit: 12 })).albums.some((x) => x.name === 'Pas un album'));
+  assert.strictEqual((await svc.recentAlbums(R2, { limit: 1 })).albums.length, 1);
 });
 
 (async () => {

@@ -68,6 +68,12 @@ router.get('/', auth, lecture, c.overview);
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
+ * /api/safebox/albums/recent:
+ *   get:
+ *     summary: "Albums de l'accueil (?limit=, 3 par défaut, 12 au plus) — les derniers remplis, avec leur nombre de fichiers et 4 fichiers de couverture (photos et vidéos d'abord)"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
  * /api/safebox/folders:
  *   post:
  *     summary: "Créer un sous-dossier — { parentId, name }"
@@ -91,6 +97,7 @@ router.get('/', auth, lecture, c.overview);
  *       400:
  *         description: "SAFEBOX_INVALID_MOVE (dossier hors d'Albums, liste vide ou trop longue)"
  */
+router.get('/albums/recent', auth, lecture, c.recentAlbums);
 router.get('/folders/:id', auth, lecture, c.listFolder);
 router.post('/folders', auth, ecriture, c.createFolder);
 router.patch('/folders/:id', auth, ecriture, c.updateFolder);
@@ -302,6 +309,27 @@ router.get('/shares/:id/download', auth, lecture, c.shareDownload);
 router.post('/shares/:id/save', auth, ecriture, c.saveShare);
 router.get('/shares/:id/recipients', auth, lecture, c.shareRecipients);
 router.post('/shares/:id/revoke', auth, ecriture, c.revokeShare);
+
+/**
+ * @swagger
+ * /api/safebox/backup/check:
+ *   post:
+ *     summary: "Sauvegarde automatique — { fps: [empreintes de l'original, 500 au plus], link? } → saved | elsewhere | uploading | skip | new"
+ *     description: >
+ *       Avec `link: true`, un contenu déjà ailleurs dans le coffre (un album, Partager) est ajouté sans copie
+ *       au dossier de son type. L'empreinte est liée au compte par le serveur.
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ * /api/safebox/backup/skip:
+ *   post:
+ *     summary: "« Ne plus sauvegarder » ces originaux — { fps }"
+ *     tags: [Safebox]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/backup/check', auth, ecriture, c.backupCheck);
+router.post('/backup/skip', auth, ecriture, c.backupSkip);
 
 /**
  * @swagger
