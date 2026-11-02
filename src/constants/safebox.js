@@ -39,7 +39,7 @@ const DEFAULT_EXTENSIONS = Object.freeze({
 
 /** Valeurs de la migration 101, si la ligne `safebox_settings` manque. */
 const DEFAULT_SETTINGS = Object.freeze({
-  base_quota_bytes: 10 * Gio,
+  base_quota_bytes: Gio,
   max_file_bytes: 1 * Gio,
   max_file_bytes_plus: 1 * Gio,
   max_depth: 5,

@@ -212,7 +212,7 @@
     </div>
     <div class="decision">
       <div class="lbl">Espace</div>
-      <div class="val">10 Go offerts, 25 Go avec Alanya Plus</div>
+      <div class="val">1 Go offert, 25 Go avec Alanya Plus</div>
       <div class="note">Le serveur compte les octets réellement stockés et réserve la place avant chaque envoi : on ne peut pas dépasser son espace. Un fichier présent à deux endroits du coffre ne compte qu'une fois.</div>
     </div>
     <div class="decision">
@@ -350,7 +350,7 @@
         <p><strong>Documents.</strong> Depuis Android 11, aucune autorisation simple ne donne accès à tous les PDF du téléphone. L'autorisation « Accès à tous les fichiers » existe, mais Google la réserve à quelques catégories d'applications. D'où les dossiers choisis.</p>
         <p><strong>iOS.</strong> Seules les photos et vidéos peuvent se sauvegarder (PhotoKit), avec un fonctionnement en arrière-plan très limité. Rien n'a pu être essayé sans Mac.</p>
         <p><strong>Batterie et temps.</strong> La compression se fait sur le téléphone. Un historique de 17 Go de vidéos demande plusieurs heures de calcul, d'où l'option « pendant la charge ». En Original, rien à compresser, mais plus de données à envoyer.</p>
-        <p><strong>Coût.</strong> Avec la sauvegarde automatique, les comptes gratuits vont réellement remplir leurs 10 Go (section 11).</p>
+        <p><strong>Coût.</strong> Avec la sauvegarde automatique, les comptes gratuits vont réellement remplir leur 1 Go (section 11).</p>
       </div>
     </div>
   </section>
@@ -496,7 +496,7 @@
     <div class="gutter"><span class="num">07</span></div>
     <div class="col">
       <h2>L'espace et son compteur</h2>
-      <p>L'espace de base vaut 10 Go (10 Gio, soit 10 737 418 240 octets). C'est un réglage de l'admin, pas une constante du code : on doit pouvoir le baisser pour les nouveaux comptes si les coûts l'exigent. Un abonné Alanya Plus a 25 Go (décision du 18/10, migration 105), réglable par plan.</p>
+      <p>L'espace de base vaut 1 Go (1 Gio, soit 1 073 741 824 octets), au lieu de 10 Go jusqu'au 02/11/2026 (migration 112). C'est un réglage de l'admin, pas une constante du code ; il vaut pour tous les comptes sans Alanya Plus. Un compte déjà au-dessus garde ses fichiers mais ne peut plus en ajouter. Un abonné Alanya Plus a 25 Go (décision du 18/10, migration 105), réglable par plan.</p>
       <h3>Ce qui compte dans l'espace</h3>
       <ul class="plain">
         <li>Les octets réellement stockés : après compression et chiffrement, aperçu compris.</li>
@@ -509,15 +509,15 @@
       <p>Un fichier simplement téléchargé sur le téléphone ne compte pas : il ne coûte rien en stockage.</p>
       <h3>Ce que voit l'inscrit</h3>
       <ul class="plain">
-        <li>Sur l'accueil, la carte « 7,3 Go sur 10 Go », une barre répartie par dossier (Photos, Vidéos, Audio, Docs, Albums, Partager), l'espace disponible et un lien « Passer à Plus · 25 Go ».</li>
+        <li>Sur l'accueil, la carte « 7,3 Go sur 10 Go », une barre répartie par dossier (Photos, Vidéos, Audio, Docs, Albums, Partager), et l'espace disponible. Depuis le 02/11, le coffre ne propose plus de bouton vers Alanya Plus.</li>
         <li>Une notification à 80 %, 95 % et 100 %, avec un bouton vers Alanya Plus et un autre vers « Libérer de l'espace ».</li>
         <li>« Libérer de l'espace » : les plus gros fichiers d'abord, les fichiers de Partager téléchargés par tous, la corbeille.</li>
         <li>Coffre plein : la sauvegarde et les ajouts s'arrêtent avec l'offre Alanya Plus. Lire, télécharger, supprimer et envoyer un fichier déjà présent restent possibles.</li>
       </ul>
-      <h3>Fin d'Alanya Plus avec un coffre au-dessus de 10 Go</h3>
-      <p>Décision du 15/10 : délai commun du module d'abonnement, 30 jours (<code>billing_settings.retention_days</code>). Dès l'échéance, le coffre passe en lecture seule. La notification d'avant-purge (<code>purgeWarning</code>) prévient. 30 jours après, s'il n'a ni repris Plus ni libéré de place, le serveur supprime ce qui dépasse 10 Go, en commençant par les fichiers les plus récents.</p>
+      <h3>Fin d'Alanya Plus avec un coffre au-dessus de 1 Go</h3>
+      <p>Décision du 15/10 : délai commun du module d'abonnement, 30 jours (<code>billing_settings.retention_days</code>). Dès l'échéance, le coffre passe en lecture seule. La notification d'avant-purge (<code>purgeWarning</code>) prévient. 30 jours après, s'il n'a ni repris Plus ni libéré de place, le serveur supprime ce qui dépasse 1 Go, en commençant par les fichiers les plus récents.</p>
       <h3>Phase gratuite</h3>
-      <p>Tant que l'interrupteur du payant est éteint, tout le monde a 10 Go. Le calcul de l'espace ne passe pas par le catalogue des fonctionnalités : <code>decideEntitlements</code> ouvre tout à tous hors phase payante, ce qui donnerait un espace illimité.</p>
+      <p>Tant que l'interrupteur du payant est éteint, tout le monde a 1 Go. Le calcul de l'espace ne passe pas par le catalogue des fonctionnalités : <code>decideEntitlements</code> ouvre tout à tous hors phase payante, ce qui donnerait un espace illimité.</p>
     </div>
   </section>
 
@@ -596,6 +596,7 @@
             <tr><td>Fichiers</td><td>Retiré le 30/10 : les six dossiers sont sur l'accueil.</td></tr>
             <tr><td>Photos, Vidéos, Audio, Documents</td><td>Par jour, filtres par dossier du téléphone, pastille sur les fichiers en attente. Pas de bouton « Ajouter » dans Photos, qui se remplit seul.</td></tr>
             <tr><td>Album</td><td>Une grille de tous les types : vignette des photos, durée des vidéos, première page ou icône des documents, titre et durée des audios. Filtres par type, bouton « Ajouter ».</td></tr>
+            <tr><td>Visionneuse</td><td>Depuis le 02/11 : toucher une photo ou une vidéo ouvre la visionneuse du dossier, on passe à la suivante d'un glissement. Zoom sur les photos ; sous une photo, son commentaire (texte et audio), à lire, ajouter ou modifier. Une vidéo déjà sur le téléphone, ou de 100 Mo au plus, se lance seule ; au-delà, un bouton « Lire · 568 Mo » évite de consommer sans le vouloir.</td></tr>
             <tr><td>Sélection</td><td>Barre du haut « 5 sélectionnées · Tout », barre du bas Télécharger · Envoyer · Album · Déplacer · Supprimer, avec le nombre et la taille. Depuis le 31/10, l'appui long sélectionne aussi les sous-dossiers, avec ou sans fichiers (« 2 dossiers · 3 fichiers ») : Envoyer (une carte par dossier avec tout son contenu, sous-dossiers compris, et une pour les fichiers choisis à part ; au-delà de 500 fichiers, la carte se découpe en « Kribi · 1/3 »… ; après une coupure, réessayer n'envoie que ce qui manque), Déplacer, Supprimer. Le menu d'un seul dossier reste au ⋮.</td></tr>
             <tr><td>Télécharger</td><td>Quoi (la sélection ou tout le dossier), où (galerie du téléphone ou fichier ZIP), « Seulement en Wi-Fi » ; les fichiers sont déchiffrés sur le téléphone.</td></tr>
             <tr><td>Transferts</td><td>Onglets Envois et Téléchargements, total et temps restant, « Tout mettre en pause », en cours (compression, envoi, en pause, en attente) et terminés avec le gain obtenu.</td></tr>
@@ -628,7 +629,7 @@
             <tr><td>Corbeille</td><td>Les fichiers mis à la corbeille ; leurs blocs chez MEGA si plus rien ne les désigne</td><td>30 jours après</td></tr>
             <tr><td>Envois abandonnés</td><td>Les blocs d'un envoi jamais terminé, et sa réservation</td><td>48 heures sans nouveau bloc</td></tr>
             <tr><td>Comptes supprimés</td><td>Tout le coffre du compte et ses partages. Les blocs encore désignés par le coffre d'un autre inscrit restent</td><td>Au terme du délai de suppression de compte actuel</td></tr>
-            <tr><td>Espace dépassé</td><td>Ce qui dépasse 10 Go après la fin d'Alanya Plus, les fichiers les plus récents d'abord</td><td>30 jours après l'échéance (section 07)</td></tr>
+            <tr><td>Espace dépassé</td><td>Ce qui dépasse 1 Go après la fin d'Alanya Plus, les fichiers les plus récents d'abord</td><td>30 jours après l'échéance (section 07)</td></tr>
             <tr><td>Orphelins</td><td>Les objets présents chez MEGA sans ligne en base (plus de deux jours)</td><td>Une fois par semaine, en lisant le bucket</td></tr>
             <tr><td>Fichiers perdus</td><td>Rien n'est supprimé : un fichier dont un bloc manque chez MEGA est marqué <code>lost_at</code> et affiché « Fichier endommagé »</td><td>Le même passage hebdomadaire</td></tr>
           </tbody>
@@ -651,14 +652,14 @@
         <table>
           <thead><tr><th>Cas</th><th class="num">Volume</th><th class="num">Coût par mois</th><th class="num">En XAF</th></tr></thead>
           <tbody>
-            <tr><td>Un compte gratuit plein</td><td class="num">10 Go</td><td class="num">0,025 €</td><td class="num">≈ 16</td></tr>
-            <tr><td>1 000 comptes gratuits pleins</td><td class="num">10 To</td><td class="num">25 €</td><td class="num">≈ 16 400</td></tr>
-            <tr><td>10 000 comptes gratuits pleins</td><td class="num">100 To</td><td class="num">250 €</td><td class="num">≈ 164 000</td></tr>
+            <tr><td>Un compte gratuit plein</td><td class="num">1 Go</td><td class="num">0,0025 €</td><td class="num">≈ 1,6</td></tr>
+            <tr><td>1 000 comptes gratuits pleins</td><td class="num">1 To</td><td class="num">2,50 €</td><td class="num">≈ 1 640</td></tr>
+            <tr><td>10 000 comptes gratuits pleins</td><td class="num">10 To</td><td class="num">25 €</td><td class="num">≈ 16 400</td></tr>
             <tr><td>Un abonné Plus plein, à 25 Go</td><td class="num">25 Go</td><td class="num">0,0625 €</td><td class="num">≈ 41</td></tr>
           </tbody>
         </table>
       </div>
-      <p><strong>Ce qui change avec la sauvegarde automatique</strong> : jusqu'ici, la plupart des comptes ne devaient remplir qu'une partie de leurs 10 Go. Avec la sauvegarde de la galerie, une bonne partie les remplira, et la dépense suit à peu près le nombre de comptes actifs : environ 25 € par mois pour 1 000 comptes pleins, 250 € pour 10 000. À signaler à la hiérarchie. Le levier reste le réglage de l'espace de base pour les nouveaux comptes.</p>
+      <p><strong>Ce qui change avec la sauvegarde automatique</strong> : jusqu'ici, la plupart des comptes ne devaient remplir qu'une partie de leur espace. Avec la sauvegarde de la galerie, une bonne partie les remplira, et la dépense suit à peu près le nombre de comptes actifs : environ 2,50 € par mois pour 1 000 comptes pleins, 25 € pour 10 000 (avec 1 Go offert). À signaler à la hiérarchie. Le levier reste le réglage de l'espace de base pour les nouveaux comptes.</p>
       <p>L'espace payant est vendu avec Alanya Plus : 1 000 XAF par an, environ 83 XAF par mois, pour 25 Go qui coûtent environ 41 XAF par mois quand ils sont pleins.</p>
       <h3>Ce qui limite la dépense</h3>
       <ul class="plain">
@@ -786,7 +787,7 @@ POST   /backup/skip              ajouter des empreintes à « ne plus sauvegarde
             <tr><td>Dossier Partager (24/10)</td><td>Tous les types, gardé jusqu'à suppression par l'expéditeur, onglets Mes envois et Reçus.</td></tr>
             <tr><td>Carte dans la discussion (24/10)</td><td>Un bouton qui ouvre un écran dans Alanya, pas de lien ; un album en une seule carte ; pas de durée de validité.</td></tr>
             <tr><td>Interface (24/10, 30/10)</td><td>Accueil A + B sans le bouton du bas de A. Le 30/10 : un seul écran, sans barre du bas (Fichiers, Partager et Transferts répétaient l'accueil).</td></tr>
-            <tr><td>Fin d'Alanya Plus (15/10)</td><td>30 jours : lecture seule, puis suppression de ce qui dépasse 10 Go.</td></tr>
+            <tr><td>Fin d'Alanya Plus (15/10)</td><td>30 jours : lecture seule, puis suppression de ce qui dépasse 1 Go.</td></tr>
             <tr><td>Clés de chiffrement (15/10)</td><td>Gardées par le serveur.</td></tr>
             <tr><td>Gros fichiers (15/10)</td><td>1 Go pour tous, 3 téléchargements par destinataire et par 24 heures.</td></tr>
             <tr><td>Espace payant (15/10, 18/10)</td><td>Vendu avec Alanya Plus : 25 Go.</td></tr>
