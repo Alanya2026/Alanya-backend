@@ -64,6 +64,15 @@ require.cache[dbPath] = {
 };
 
 const s = require('./voicemailScheduleService');
+
+// Le droit Alanya Plus est piloté ici : la fausse base n'a pas les tables de
+// l'offre.
+let droitRepondeur = true;
+let droitsDemandes = 0;
+s._setVoicemailRightChecker(async () => {
+  droitsDemandes += 1;
+  return droitRepondeur;
+});
 const sl = require('./voicemailSlots');
 
 const creneau = (patch = {}) => ({ ...s.DEFAULT_SCHEDULE, ...patch });
@@ -339,6 +348,31 @@ async function main() {
   );
   ligneUser = { ...ligneUser, no_answer_enabled: 0 };
   assert.strictEqual((await s.shouldFallBackToVoicemail(42)).fallback, false);
+
+  /* ══ Sans Alanya Plus, après l'essai : le téléphone sonne ══ */
+
+  droitRepondeur = false;
+  ligneUser = { ...ligneUser, untilAt: new Date('2026-09-21T13:00:00Z'), no_answer_enabled: 1 };
+  const horsDroit = await s.shouldInterceptCall(42, 8, maintenant);
+  assert.strictEqual(horsDroit.intercept, false, 'sans le droit, aucun appel n’est intercepté');
+  assert.strictEqual(
+    s.isNoAnswerEnabled(horsDroit.schedule),
+    false,
+    'le créneau rendu à call_user n’arme plus le filet sans réponse',
+  );
+  assert.strictEqual(
+    (await s.shouldFallBackToVoicemail(42, maintenant)).fallback,
+    false,
+    'ni rattrapage après sonnerie',
+  );
+  droitRepondeur = true;
+  assert.strictEqual((await s.shouldInterceptCall(42, 8, maintenant)).intercept, true,
+    'le réglage, intact, reprend dès le paiement');
+
+  ligneUser = { ...ligneUser, untilAt: null, no_answer_enabled: 0 };
+  droitsDemandes = 0;
+  await s.shouldInterceptCall(42, 8, maintenant);
+  assert.strictEqual(droitsDemandes, 0, 'aucun calcul de droits pour un répondeur éteint');
 
   console.log('✓ voicemailScheduleService v2 : plages, minuit, 24 h, exclusivité, délai de bascule');
 }
