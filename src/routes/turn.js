@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { authCustom } = require('../middleware/authCustom');
-const { buildIceServers } = require('../utils/turnCredentials');
+const { buildIceServersWithFallback } = require('../utils/turnCredentials');
 
 /**
  * @swagger
@@ -26,9 +26,9 @@ const { buildIceServers } = require('../utils/turnCredentials');
  *                 ttlSec:
  *                   type: integer
  */
-router.get('/credentials', authCustom, (req, res) => {
+router.get('/credentials', authCustom, async (req, res) => {
   try {
-    const { iceServers, ttlSec } = buildIceServers(req.user.alanyaID);
+    const { iceServers, ttlSec } = await buildIceServersWithFallback(req.user.alanyaID);
     res.json({ iceServers, ttlSec });
   } catch (error) {
     console.error('[TURN] credentials error:', error.message);

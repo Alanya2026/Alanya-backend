@@ -1,4 +1,14 @@
 const crypto = require('crypto');
+const { createCloudflareTurn } = require('./cloudflareTurn');
+const { createTurnHealth, probeTargets } = require('./turnHealth');
+
+// Temps pendant lequel un téléphone garde la liste : l'application conserve
+// `ttlSec - 600` secondes, soit cinq minutes. Sans cela, il la gardait aussi
+// longtemps que ses identifiants, et ne voyait pas le repli en cas de panne.
+const CLIENT_LIST_TTL_SEC = 900;
+
+const turnHealth = createTurnHealth();
+const cloudflareTurn = createCloudflareTurn();
 
 const DEFAULT_STUN = [
   { urls: 'stun:turn.kemita.eu:3478' },
@@ -93,4 +103,22 @@ const buildIceServers = (userId) => {
   };
 };
 
-module.exports = { buildIceServers };
+/**
+ * Nos serveurs d'abord. Cloudflare ne s'ajoute à la liste que s'ils sont tous
+ * muets, et sans les retirer : une sonde peut se tromper, et WebRTC garde alors
+ * le chemin qui fonctionne.
+ */
+const buildIceServersWithFallback = async (
+  userId,
+  { health = turnHealth, cloudflare = cloudflareTurn } = {},
+) => {
+  const { iceServers } = buildIceServers(userId);
+  const available = await health.isAnyAvailable(probeTargets(parseTurnServers()));
+  const fallback = available ? [] : await cloudflare.getIceServers();
+  return {
+    iceServers: [...iceServers, ...fallback],
+    ttlSec: CLIENT_LIST_TTL_SEC,
+  };
+};
+
+module.exports = { buildIceServers, buildIceServersWithFallback };
