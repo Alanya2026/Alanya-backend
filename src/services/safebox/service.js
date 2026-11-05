@@ -217,7 +217,6 @@ function createSafeboxService({
       roots: C.ROOTS.map((root) => ({ id: racines[root].id, root })),
       limits: {
         maxFileBytes: sonEspace.maxFileBytes,
-        shareDownloadsPerDay: settings.shareDownloadsPerDay,
         blockBytes: C.BLOCK_BYTES,
         maxPreviewBytes: C.MAX_PREVIEW_BYTES,
         maxDepth: settings.maxDepth,
@@ -1803,15 +1802,6 @@ function createSafeboxService({
     return out;
   }
 
-  async function telechargementsRestants(conn, shareId, alanyaID, limite) {
-    const [[r]] = await conn.query(
-      `SELECT COUNT(*) AS n FROM safebox_share_download
-        WHERE share_id = ? AND alanyaID = ? AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)`,
-      [shareId, alanyaID],
-    );
-    return Math.max(0, limite - Number(r.n));
-  }
-
   const shareShape = (s, disponible, extra = {}) => ({
     id: Number(s.id),
     conversationId: Number(s.conversation_id),
@@ -1948,7 +1938,6 @@ function createSafeboxService({
    */
   async function shareInfo(alanyaID, shareId) {
     const storage = ready();
-    const settings = await getSettings();
     const { s, fichier } = await partageVisible(alanyaID, shareId);
     const expediteur = Number(s.sender_id) === Number(alanyaID);
     const extra = { isSender: expediteur, sender: await expediteurDe(s) };
@@ -1959,9 +1948,6 @@ function createSafeboxService({
       if (expediteur) extra.fileIds = dispo.map((e) => Number(e.fichier.id));
       extra.cover = await elementsShape(storage, alanyaID, dispo.slice(0, 4));
       if (dispo.length) {
-        extra.downloadsLeft = expediteur
-          ? null
-          : await telechargementsRestants(db, s.id, alanyaID, settings.shareDownloadsPerDay);
         extra.savedCount = (await mesContenus(alanyaID, dispo.map((e) => e.fichier.blob_id))).size;
       }
       return shareShape(s, dispo.length > 0, extra);
@@ -1974,9 +1960,6 @@ function createSafeboxService({
       extra.previewUrl = Number(fichier.preview_bytes) > 0
         ? await storage.downloadUrl(R.previewKey(fichier.prefix), C.PREVIEW_URL_TTL_S)
         : null;
-      extra.downloadsLeft = expediteur
-        ? null
-        : await telechargementsRestants(db, s.id, alanyaID, settings.shareDownloadsPerDay);
       extra.savedFileId = (await mesContenus(alanyaID, [fichier.blob_id])).get(Number(fichier.blob_id)) ?? null;
       const d = (await detailsDe([fichier.blob_id])).get(Number(fichier.blob_id));
       extra.meta = d?.meta ?? null;
@@ -2015,11 +1998,12 @@ function createSafeboxService({
    */
   async function shareDownload(alanyaID, shareId, query = {}) {
     const storage = ready();
-    const settings = await getSettings();
     const { s, fichier } = await partageVisible(alanyaID, shareId);
     const cible = estLot(s) ? await elementDuLot(s, query.item) : fichier;
     if (!cible) throw retire();
     if (Number(s.sender_id) !== Number(alanyaID)) {
+      // Plus de limite depuis le 05/11/2026 : ces lignes ne servent qu'aux
+      // chiffres de l'admin, un téléchargement par partage et par 2 h.
       await tx(async (conn) => {
         // Verrou du partage : deux demandes simultanées ne comptent qu'une fois.
         await conn.query('SELECT id FROM safebox_share WHERE id = ? FOR UPDATE', [s.id]);
@@ -2029,11 +2013,6 @@ function createSafeboxService({
           [s.id, alanyaID],
         );
         if (recent.length) return;
-        if (await telechargementsRestants(conn, s.id, alanyaID, settings.shareDownloadsPerDay) <= 0) {
-          throw new SafeboxError('SAFEBOX_DOWNLOAD_LIMIT', 429, "Trop de téléchargements de ce fichier aujourd'hui", {
-            limit: settings.shareDownloadsPerDay,
-          });
-        }
         await conn.query('INSERT INTO safebox_share_download (share_id, alanyaID) VALUES (?, ?)', [s.id, alanyaID]);
       });
       await noterDestinataire(s.id, alanyaID);

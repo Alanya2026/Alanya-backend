@@ -30,7 +30,6 @@ function parseSafeboxSettingsPatch(body) {
     max_file_bytes_plus: [1024 * 1024, 100 * Gio],
     max_depth: [1, 20],
     max_folders: [1, 100_000],
-    share_downloads_per_day: [1, 1000],
   };
   for (const [cle, [min, max]] of Object.entries(bornes)) {
     if (src[cle] === undefined) continue;
@@ -172,7 +171,6 @@ const getSafeboxAdmin = async (req, res) => {
         maxFileBytesPlus: reglages.maxFileBytesPlus,
         maxDepth: reglages.maxDepth,
         maxFolders: reglages.maxFolders,
-        shareDownloadsPerDay: reglages.shareDownloadsPerDay,
         extensions: reglages.extensions,
         lastReconcileAt: reglages.lastReconcileAt,
       },

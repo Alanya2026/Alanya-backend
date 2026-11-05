@@ -542,7 +542,7 @@
         <li><div class="step"><p><strong>Un fichier du téléphone entre d'abord dans Partager</strong>, avec la feuille des trois formats. Pendant son envoi vers le coffre, l'expéditeur voit déjà la carte dans la discussion, avec la progression et « Annuler ». Les membres ne la voient qu'à la fin.</p></div></li>
         <li><div class="step"><p><strong>Un message « fichier du coffre » part dans la discussion</strong>, pour un fichier ou pour un lot (un album, une sélection). Le lot en un seul message est nouveau : aujourd'hui, un message ne porte qu'un fichier (section 12).</p></div></li>
         <li><div class="step"><p><strong>La carte du destinataire.</strong> Pour un album : une mosaïque de quatre vignettes avec « +38 », un badge « Coffre-fort », le titre, le nombre d'éléments et la taille (« 42 éléments · 186 Mo · 35 photos, 6 vidéos, 1 document »), et un bouton <strong>« Voir l'album »</strong>. Pour un fichier seul : sa vignette, sa durée s'il s'agit d'une vidéo, son nom, sa taille et sa qualité, et un bouton <strong>« Ouvrir »</strong>. Le bouton ouvre un écran dans Alanya : il n'y a pas de lien.</p></div></li>
-        <li><div class="step"><p><strong>L'écran ouvert.</strong> Un album : la grille avec des filtres par type, « Garder dans mon coffre » et « Tout télécharger » (galerie ou fichier ZIP). Un fichier seul : son aperçu, qui l'a envoyé, « Télécharger et lire » et « Garder dans mon coffre ». Les deux rappellent « Disponible tant que l'expéditeur le garde » et la limite de téléchargements.</p></div></li>
+        <li><div class="step"><p><strong>L'écran ouvert.</strong> Un album : la grille avec des filtres par type, « Garder dans mon coffre » et « Tout télécharger » (galerie ou fichier ZIP). Un fichier seul : son aperçu, qui l'a envoyé, « Télécharger et lire » et « Garder dans mon coffre ». Les deux rappellent « Disponible tant que l'expéditeur le garde ». Depuis le 05/11, les photos et vidéos s'ouvrent dans la visionneuse, sans rien enregistrer sur le téléphone (voir Interface).</p></div></li>
         <li><div class="step"><p><strong>Télécharger.</strong> Le serveur vérifie que le demandeur est membre de la discussion maintenant, que le partage existe et que la limite n'est pas atteinte. Il renvoie les adresses signées, valables 15 minutes, et la clé. Le téléchargement reprend après une coupure par requêtes <code>Range</code>. Le fichier déchiffré va dans la galerie (album « Alanya ») ou dans <code>Téléchargements/Alanya</code>.</p></div></li>
         <li><div class="step"><p><strong>Garder dans mon coffre.</strong> Rien n'est copié chez MEGA : le fichier du destinataire désigne les mêmes blocs que celui de l'expéditeur. Un album gardé devient un album dans ses Albums. Le fichier compte dans l'espace de chacun des deux, et la copie survit à la suppression par l'expéditeur.</p></div></li>
         <li><div class="step"><p><strong>Chez l'expéditeur.</strong> Sa carte affiche « Téléchargé par 2 sur 7 » et un bouton <strong>« Voir le suivi »</strong> : la liste des membres (téléchargé, gardé dans son coffre, pas encore), « Envoyer ailleurs » et « Retirer le partage ». Rien ne s'efface automatiquement : l'expéditeur supprime lui-même, et la carte affiche alors « Fichier retiré par l'expéditeur ».</p></div></li>
@@ -565,12 +565,12 @@
       </div>
       <ul class="plain">
         <li><strong>Deux niveaux.</strong> Une mini-image floue d'environ 32 px (2 Ko) voyage dans le message : la carte s'affiche tout de suite, même hors connexion. L'aperçu net d'environ 480 px (40 Ko) est rangé chiffré chez MEGA et se charge par la route du partage.</li>
-        <li>Charger l'aperçu ne compte pas dans la limite de téléchargements.</li>
+        <li>L'aperçu s'affiche sans télécharger le fichier.</li>
       </ul>
       <h3>Garde-fous</h3>
       <ul class="plain">
         <li><strong>Pas de lien public.</strong> Seuls les membres de la discussion peuvent ouvrir et télécharger, avec leur session Alanya. Un membre qui quitte un groupe perd l'accès.</li>
-        <li><strong>Limite de téléchargements</strong>, réglable par l'admin : 3 par destinataire et par partage sur 24 heures ; une reprise dans les 2 heures ne recompte pas. <span class="chip todo">à confirmer</span> Pour un album, tout ce qui est téléchargé du même lot dans les 2 heures compte une fois.</li>
+        <li><strong>Pas de limite de téléchargements</strong> (décision du 05/11, retrait des 3 par 24 heures). Risque accepté : un fichier lourd envoyé dans un grand groupe sort autant de fois qu'il est téléchargé, sans plafond (section 11). Le nombre de téléchargements reste suivi dans l'admin.</li>
         <li><strong>Taille maximale</strong> d'un fichier : 1 Go pour tous, abonnés compris (réglable séparément pour Plus dans l'admin).</li>
         <li><strong>Signalement</strong> (codé le 18/10) : dans Admin › Signalements, la modération voit l'aperçu déchiffré par le serveur, peut retirer tous les partages de ce contenu, ou le supprimer partout (super-admin). Ouvrir le fichier entier depuis l'admin n'est pas prévu.</li>
       </ul>
@@ -596,7 +596,7 @@
             <tr><td>Fichiers</td><td>Retiré le 30/10 : les six dossiers sont sur l'accueil.</td></tr>
             <tr><td>Photos, Vidéos, Audio, Documents</td><td>Par jour, filtres par dossier du téléphone, pastille sur les fichiers en attente. Pas de bouton « Ajouter » dans Photos, qui se remplit seul.</td></tr>
             <tr><td>Album</td><td>Une grille de tous les types : vignette des photos, durée des vidéos, première page ou icône des documents, titre et durée des audios. Filtres par type, bouton « Ajouter ».</td></tr>
-            <tr><td>Visionneuse</td><td>Depuis le 02/11 : toucher une photo ou une vidéo ouvre la visionneuse du dossier, on passe à la suivante d'un glissement. Zoom sur les photos ; sous une photo, son commentaire (texte et audio), à lire, ajouter ou modifier. Une vidéo déjà sur le téléphone, ou de 100 Mo au plus, se lance seule ; au-delà, un bouton « Lire · 568 Mo » évite de consommer sans le vouloir.</td></tr>
+            <tr><td>Visionneuse</td><td>Depuis le 02/11 : toucher une photo ou une vidéo ouvre la visionneuse du dossier, on passe à la suivante d'un glissement. Zoom sur les photos ; sous une photo, son commentaire (texte et audio), à lire, ajouter ou modifier. Une vidéo déjà sur le téléphone, ou de 100 Mo au plus, se lance seule ; au-delà, un bouton « Lire · 568 Mo » évite de consommer sans le vouloir. Depuis le 05/11, elle sert aussi aux fichiers reçus (discussions, onglet Reçus) : l'aperçu tout de suite, puis le fichier, gardé dans l'espace privé de l'application ; « Télécharger » l'enregistre sur le téléphone, « Garder » dans le coffre. Un destinataire ne voit pas les commentaires, privés. La lecture d'une vidéo pendant son arrivée (streaming) reste à faire.</td></tr>
             <tr><td>Sélection</td><td>Barre du haut « 5 sélectionnées · Tout », barre du bas Télécharger · Envoyer · Album · Déplacer · Supprimer, avec le nombre et la taille. Depuis le 31/10, l'appui long sélectionne aussi les sous-dossiers, avec ou sans fichiers (« 2 dossiers · 3 fichiers ») : Envoyer (une carte par dossier avec tout son contenu, sous-dossiers compris, et une pour les fichiers choisis à part ; au-delà de 500 fichiers, la carte se découpe en « Kribi · 1/3 »… ; après une coupure, réessayer n'envoie que ce qui manque), Déplacer, Supprimer. Le menu d'un seul dossier reste au ⋮.</td></tr>
             <tr><td>Télécharger</td><td>Quoi (la sélection ou tout le dossier), où (galerie du téléphone ou fichier ZIP), « Seulement en Wi-Fi » ; les fichiers sont déchiffrés sur le téléphone.</td></tr>
             <tr><td>Transferts</td><td>Onglets Envois et Téléchargements, total et temps restant, « Tout mettre en pause », en cours (compression, envoi, en pause, en attente) et terminés avec le gain obtenu.</td></tr>
@@ -665,7 +665,7 @@
       <ul class="plain">
         <li><strong>Le serveur ne relaie aucun octet</strong> : pas de bande passante du VPS.</li>
         <li><strong>Un fichier à plusieurs endroits, ou gardé par plusieurs inscrits, n'est stocké qu'une fois</strong> chez MEGA.</li>
-        <li><strong>La sortie de données est bornée</strong> par la limite de téléchargements des partages.</li>
+        <li><strong>La sortie de données n'est plus bornée</strong> depuis le retrait de la limite de téléchargements (05/11) : à surveiller dans le compte MEGA.</li>
         <li><strong>HD présélectionné</strong> quand l'Original ne tient pas : une galerie de 24 Go en Original tient en environ 3 Go en HD.</li>
       </ul>
       <h3>Ce qui pousse vers Alanya Plus</h3>
@@ -686,7 +686,7 @@
       <h2>Tables, routes et réglages</h2>
       <p>Ce qui existe (lots 1 à 5, migrations 101 à 107), puis ce que la refonte ajoute. La prochaine migration libre est <code>108</code>, à revérifier avant de numéroter.</p>
 <pre><span class="c">-- Existant (101 à 107)</span>
-<span class="k">safebox_settings</span>     espace de base, tailles max, profondeur, dossiers, extensions, téléchargements par jour
+<span class="k">safebox_settings</span>     espace de base, tailles max, profondeur, dossiers, extensions
 <span class="k">safebox_account</span>      coffre ouvert ; verrou des réservations d'espace
 <span class="k">safebox_folder</span>       id, alanyaID, parent_id, root, name, path, depth, trashed_at…
 <span class="k">safebox_blob</span>         les blocs chez MEGA : prefix, block_count, stored_bytes, wrapped_key, status, meta, lost_at
@@ -789,7 +789,7 @@ POST   /backup/skip              ajouter des empreintes à « ne plus sauvegarde
             <tr><td>Interface (24/10, 30/10)</td><td>Accueil A + B sans le bouton du bas de A. Le 30/10 : un seul écran, sans barre du bas (Fichiers, Partager et Transferts répétaient l'accueil).</td></tr>
             <tr><td>Fin d'Alanya Plus (15/10)</td><td>30 jours : lecture seule, puis suppression de ce qui dépasse 1 Go.</td></tr>
             <tr><td>Clés de chiffrement (15/10)</td><td>Gardées par le serveur.</td></tr>
-            <tr><td>Gros fichiers (15/10)</td><td>1 Go pour tous, 3 téléchargements par destinataire et par 24 heures.</td></tr>
+            <tr><td>Gros fichiers (15/10)</td><td>1 Go pour tous. Limite de 3 téléchargements par 24 heures retirée le 05/11.</td></tr>
             <tr><td>Espace payant (15/10, 18/10)</td><td>Vendu avec Alanya Plus : 25 Go.</td></tr>
             <tr><td>Comptes inactifs (15/10)</td><td>Aucune purge : le coffre est gardé sans limite de durée.</td></tr>
             <tr><td>Client web (15/10, 18/10)</td><td>Application mobile seulement ; version web prévue plus tard.</td></tr>
@@ -813,11 +813,6 @@ POST   /backup/skip              ajouter des empreintes à « ne plus sauvegarde
           <h3>« Sauvegarder en Original »</h3>
           <p>Dans le menu d'un fichier sauvegardé en HD ou Compressé, tant que l'original est encore sur le téléphone : renvoi complet.</p>
           <p class="reco">Proposé : oui.</p>
-        </div>
-        <div>
-          <h3>Limite de téléchargements d'un album</h3>
-          <p>3 par destinataire et par 24 heures, comptés par partage.</p>
-          <p class="reco">Proposé : tout ce qui est téléchargé du même album dans les 2 heures compte une fois. Codé ainsi au lot 9 (la limite compte par partage) ; à confirmer.</p>
         </div>
       </div>
       <p>Prochaine étape : le lot 6.</p>

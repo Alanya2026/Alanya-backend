@@ -19,8 +19,8 @@ const test = (nom, fn) => {
 };
 
 test('valeurs normales, nombres ou chaînes de chiffres', () => {
-  const r = lire({ base_quota_bytes: 10 * Gio, max_file_bytes: String(Gio), share_downloads_per_day: 5 });
-  assert.deepStrictEqual(r, { ok: true, value: { base_quota_bytes: 10 * Gio, max_file_bytes: Gio, share_downloads_per_day: 5 } });
+  const r = lire({ base_quota_bytes: 10 * Gio, max_file_bytes: String(Gio), max_depth: 5 });
+  assert.deepStrictEqual(r, { ok: true, value: { base_quota_bytes: 10 * Gio, max_file_bytes: Gio, max_depth: 5 } });
 });
 
 test('hors bornes ou mal typées : refusées', () => {
@@ -29,7 +29,7 @@ test('hors bornes ou mal typées : refusées', () => {
     { max_depth: 0 },
     { max_depth: 21 },
     { max_folders: 1.5 },
-    { share_downloads_per_day: 'trois' },
+    { max_depth: 'trois' },
     { max_file_bytes: 10 }, // moins d'1 Mio
   ]) {
     assert.strictEqual(lire(corps).ok, false, JSON.stringify(corps));

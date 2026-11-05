@@ -514,33 +514,34 @@ test('message de type 11 : contenu réécrit depuis le partage', async () => {
   ), /invalide/);
 });
 
-test('carte : membres seulement, avec la clé et les téléchargements restants', async () => {
+test('carte : membres seulement, avec la clé', async () => {
   await refuse(svc.shareInfo(X, partage.shareId), 'SAFEBOX_NOT_FOUND');
   const vu = await svc.shareInfo(D, partage.shareId);
   assert.strictEqual(vu.available, true);
   assert.strictEqual(vu.key, cle.toString('base64'));
-  assert.strictEqual(vu.downloadsLeft, 3);
+  assert.strictEqual(vu.downloadsLeft, undefined, 'plus de limite depuis le 05/11/2026');
   assert.strictEqual(vu.isSender, false);
   assert.strictEqual(vu.savedFileId, null);
   const parE = await svc.shareInfo(E, partage.shareId);
   assert.strictEqual(parE.isSender, true);
-  assert.strictEqual(parE.downloadsLeft, null);
   assert.strictEqual(parE.savedFileId, fichierE.id, 'déjà dans le coffre de l\'expéditeur');
 });
 
-test('téléchargement : compté une fois par 2 h, 3 par 24 h, l\'expéditeur jamais limité', async () => {
+test('téléchargement : sans limite de nombre, noté une fois par 2 h pour l\'admin', async () => {
   const t = await svc.shareDownload(D, partage.shareId);
   assert.strictEqual(t.blocks.length, 1);
   assert.strictEqual(t.file.id, null, 'rien du coffre de l\'expéditeur ne sort');
-  await svc.shareDownload(D, partage.shareId); // reprise : ne compte pas
-  assert.strictEqual((await svc.shareInfo(D, partage.shareId)).downloadsLeft, 2);
-  for (let i = 0; i < 2; i += 1) {
+  await svc.shareDownload(D, partage.shareId); // reprise : pas de nouvelle ligne
+  const lignes = async () => Number((await pool.query(
+    'SELECT COUNT(*) AS n FROM safebox_share_download WHERE share_id = ? AND alanyaID = ?', [partage.shareId, D],
+  ))[0][0].n);
+  assert.strictEqual(await lignes(), 1);
+  // Bien au-delà des 3 d'autrefois : rien n'est refusé.
+  for (let i = 0; i < 5; i += 1) {
     await pool.query('UPDATE safebox_share_download SET created_at = DATE_SUB(created_at, INTERVAL 3 HOUR) WHERE alanyaID = ?', [D]);
-    await svc.shareDownload(D, partage.shareId);
+    assert.strictEqual((await svc.shareDownload(D, partage.shareId)).blocks.length, 1);
   }
-  await pool.query('UPDATE safebox_share_download SET created_at = DATE_SUB(created_at, INTERVAL 3 HOUR) WHERE alanyaID = ?', [D]);
-  const e = await refuse(svc.shareDownload(D, partage.shareId), 'SAFEBOX_DOWNLOAD_LIMIT');
-  assert.strictEqual(e.status, 429);
+  assert.strictEqual(await lignes(), 6);
   for (let i = 0; i < 5; i += 1) await svc.shareDownload(E, partage.shareId);
 });
 
@@ -704,7 +705,6 @@ test('lot 9 : un album en un seul partage, sa carte, ses éléments', async () =
   assert.deepStrictEqual(carte.cover.map((e) => e.name), ['Coucher.jpg', 'Hotel.pdf', 'Danse.mp4', 'Plage.jpg']);
   assert.ok(carte.cover.every((e) => e.key && e.previewUrl && e.available));
   assert.deepStrictEqual(carte.sender, { id: Ex, name: 'Clarisse', avatarUrl: null });
-  assert.strictEqual(carte.downloadsLeft, 3);
   assert.strictEqual(carte.savedCount, 0);
   assert.strictEqual(carte.tracking, undefined);
   const vueExpediteur = await svc.shareInfo(Ex, p.shareId);
@@ -724,7 +724,7 @@ test('lot 9 : un album en un seul partage, sa carte, ses éléments', async () =
   lot9 = { Ex, Dx, Mx, Hx, conv, p, simple, selection, items, plage, danse, hotel, coucher, album };
 });
 
-test('lot 9 : un lot se télécharge élément par élément, compté une fois par 2 h', async () => {
+test('lot 9 : un lot se télécharge élément par élément, noté une fois par 2 h', async () => {
   const { Ex, Dx, p, items } = lot9;
   await refuse(svc.shareDownload(Dx, p.shareId), 'SAFEBOX_SHARE_ITEM_REQUIRED');
   await refuse(svc.shareDownload(Dx, p.shareId, { item: 999999 }), 'SAFEBOX_NOT_FOUND');
@@ -735,7 +735,6 @@ test('lot 9 : un lot se télécharge élément par élément, compté une fois p
   }
   const [[n]] = await pool.query('SELECT COUNT(*) AS n FROM safebox_share_download WHERE share_id = ? AND alanyaID = ?', [p.shareId, Dx]);
   assert.strictEqual(Number(n.n), 1, 'tout l\'album dans la fenêtre de 2 h : un seul téléchargement');
-  assert.strictEqual((await svc.shareInfo(Dx, p.shareId)).downloadsLeft, 2);
   assert.deepStrictEqual((await svc.shareInfo(Ex, p.shareId)).tracking, { members: 2, downloaded: 1, saved: 0 });
 });
 
