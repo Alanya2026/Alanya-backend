@@ -255,7 +255,7 @@ router.get('/largest', auth, lecture, c.largestFiles);
  *       - bearerAuth: []
  * /api/safebox/shares/{id}:
  *   get:
- *     summary: "La carte du message : disponible ou retiré, expéditeur, aperçu, clé, téléchargements restants ; mosaïque d'un lot ; suivi pour l'expéditeur"
+ *     summary: "La carte du message : disponible ou retiré, expéditeur, aperçu, clé ; mosaïque d'un lot ; suivi pour l'expéditeur"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
@@ -270,7 +270,7 @@ router.get('/largest', auth, lecture, c.largestFiles);
  *       - bearerAuth: []
  * /api/safebox/shares/{id}/download:
  *   get:
- *     summary: "Clé et adresses de tous les blocs (15 minutes), de l'élément ?item= pour un lot — 3 téléchargements par destinataire et par 24 h, un lot compté une fois par 2 h"
+ *     summary: "Clé et adresses de tous les blocs (15 minutes), de l'élément ?item= pour un lot, sans limite de nombre"
  *     tags: [Safebox]
  *     security:
  *       - bearerAuth: []
@@ -279,8 +279,6 @@ router.get('/largest', auth, lecture, c.largestFiles);
  *         description: SAFEBOX_SHARE_ITEM_REQUIRED — un lot se télécharge élément par élément
  *       410:
  *         description: SAFEBOX_SHARE_REVOKED — l'expéditeur a supprimé le fichier ou retiré le partage
- *       429:
- *         description: SAFEBOX_DOWNLOAD_LIMIT (limit joint)
  * /api/safebox/shares/{id}/save:
  *   post:
  *     summary: "Garder dans mon coffre — { itemId?, folderId? } ; un lot entier devient un album ; aucune copie chez MEGA, compté dans mon espace"

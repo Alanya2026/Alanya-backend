@@ -256,7 +256,6 @@ L'application les traduira au lot 2 ; d'ici là, le repli lié au statut s'appli
 | `SAFEBOX_SHARE_TOO_MANY` | 400 | Plus de 500 fichiers dans un même partage (`max` joint) : envoyer en plusieurs fois |
 | `SAFEBOX_SHARE_ITEM_REQUIRED` | 400 | Téléchargement d'un lot (album, sélection) sans l'élément `?item=` — réponse des anciennes applications : « Mettez à jour Alanya » |
 | `SAFEBOX_SHARE_REVOKED` | 410 | L'expéditeur a mis le fichier partagé à la corbeille, l'a supprimé ou a retiré le partage : la carte affiche « Fichier retiré par l'expéditeur » |
-| `SAFEBOX_DOWNLOAD_LIMIT` | 429 | Trop de téléchargements de ce fichier partagé sur 24 h (`limit` joint) ; l'expéditeur n'est jamais limité |
 | `SAFEBOX_NOTE_TOO_LONG` | 400 | Commentaire d'une photo trop long : `maxChars` (200) pour le texte, `maxDurationMs` (5 minutes) pour l'audio |
 | `SAFEBOX_NOTE_UNAVAILABLE` | 400 | Les commentaires sont réservés aux photos (famille « albums ») |
 | `SAFEBOX_INVALID_NOTE` | 400 | Texte de commentaire qui n'est pas une chaîne |
@@ -338,7 +337,7 @@ correctif — un code non traduit ne fait rien afficher de brut.
 - `PROFILE_NOT_FOUND` · `PURGE_UNKNOWN` · `QR_UNKNOWN_OR_EXPIRED`
 - `RATE_LIMITED` · `REASON_REQUIRED` · `RECIPIENT_NOT_FOUND`
 - `REFRESH_INVALID` · `REFRESH_TOKEN_REQUIRED` · `REPORT_NOT_FOUND`
-- `RESERVED_BRAND_NAME` · `ROOM_ENDED` · `SAFEBOX_DOWNLOAD_LIMIT`
+- `RESERVED_BRAND_NAME` · `ROOM_ENDED`
 - `SAFEBOX_FILE_LOST` · `SAFEBOX_FILE_TOO_LARGE` · `SAFEBOX_FOLDER_LIMIT` · `SAFEBOX_INVALID_BLOCKS`
 - `SAFEBOX_INVALID_CIPHER` · `SAFEBOX_INVALID_FINGERPRINT` · `SAFEBOX_INVALID_KEY` · `SAFEBOX_INVALID_MOVE`
 - `SAFEBOX_INVALID_NAME` · `SAFEBOX_INVALID_NOTE` · `SAFEBOX_INVALID_SIZE` · `SAFEBOX_NAME_TAKEN`
