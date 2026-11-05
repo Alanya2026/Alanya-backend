@@ -19,12 +19,15 @@
  */
 
 const pool = require('../config/db');
+const { fail } = require('../utils/apiError');
+const { FEATURE } = require('../constants/billing');
 const { emitToUser } = require('../utils/userSocketRegistry');
 const {
   loadUserVoicemailSchedule,
   upsertUserVoicemailSchedule,
   isVoicemailActive,
   activeUntil,
+  hasVoicemailRight,
 } = require('../services/voicemailScheduleService');
 const { replaceSlots, MAX_SLOTS_PER_DAY } = require('../services/voicemailSlots');
 
@@ -37,9 +40,14 @@ const _formatTime = (value) => {
   return raw.length >= 5 ? raw.slice(0, 5) : raw;
 };
 
-const _formatSchedule = (schedule, now = new Date()) => {
+/**
+ * [locked] : le compte n'a pas (ou plus) droit au répondeur. Le réglage est
+ * rendu tel quel — il reprend dès le paiement — mais l'état calculé dit la
+ * vérité : rien n'est intercepté, aucun bandeau ne doit s'afficher.
+ */
+const _formatSchedule = (schedule, now = new Date(), { locked = false } = {}) => {
   const tz = schedule.resolvedTimezone;
-  const fin = activeUntil(schedule, now, tz);
+  const fin = locked ? null : activeUntil(schedule, now, tz);
   return {
     // Les deux modes qui rendent le téléphone muet, exclusifs entre eux.
     enabled: _toBool(schedule.enabled),
@@ -58,8 +66,9 @@ const _formatSchedule = (schedule, now = new Date()) => {
       schedule.greeting_seconds == null ? null : Number(schedule.greeting_seconds),
     // État calculé — lecture seule côté client. Ne reflète QUE les modes muets :
     // le filet sans-réponse n'« active » rien, il attend.
-    active: isVoicemailActive(schedule, now, tz),
+    active: !locked && isVoicemailActive(schedule, now, tz),
     activeUntil: fin ? fin.toISOString() : null,
+    locked,
     resolvedTimezone: tz,
     maxSlotsPerDay: MAX_SLOTS_PER_DAY,
   };
@@ -86,6 +95,16 @@ const _normalizePatch = (body = {}) => {
   return patch;
 };
 
+/**
+ * Le patch ALLUME-t-il un mode ? Seul l'allumage demande Alanya Plus :
+ * éteindre, choisir ses plages, sa liste ou son fuseau reste toujours permis —
+ * personne ne doit rester coincé avec un répondeur qu'il ne peut plus couper.
+ */
+const _allume = (patch) =>
+  patch.enabled === 1
+  || patch.no_answer_enabled === 1
+  || (patch.untilAt != null && patch.untilAt !== '');
+
 /** La liste désignée existe-t-elle, et appartient-elle bien à ce compte ? */
 const _listeAppartientA = async (idList, alanyaID) => {
   const [rows] = await pool.execute(
@@ -97,8 +116,12 @@ const _listeAppartientA = async (idList, alanyaID) => {
 
 const getVoicemailSchedule = async (req, res) => {
   try {
-    const schedule = await loadUserVoicemailSchedule(req.user.alanyaID);
-    res.json(_formatSchedule(schedule));
+    const alanyaID = req.user.alanyaID;
+    const [schedule, droit] = await Promise.all([
+      loadUserVoicemailSchedule(alanyaID),
+      hasVoicemailRight(alanyaID),
+    ]);
+    res.json(_formatSchedule(schedule, new Date(), { locked: !droit }));
   } catch (error) {
     console.error('[VoicemailSchedule] get error:', error.message);
     res.status(500).json({ error: 'Erreur interne', code: 'INTERNAL' });
@@ -115,6 +138,13 @@ const patchVoicemailSchedule = async (req, res) => {
       return res.status(400).json({
         error: 'Aucun paramètre valide fourni',
         code: 'NO_FIELDS_TO_UPDATE',
+      });
+    }
+
+    const droit = await hasVoicemailRight(alanyaID);
+    if (!droit && _allume(patch)) {
+      return fail(res, 403, 'SUBSCRIPTION_REQUIRED', 'Fonctionnalité réservée à Alanya Plus', {
+        feature: FEATURE.VOICEMAIL,
       });
     }
 
@@ -138,7 +168,7 @@ const patchVoicemailSchedule = async (req, res) => {
     const next = Object.keys(patch).length > 0
       ? await upsertUserVoicemailSchedule(alanyaID, patch)
       : await loadUserVoicemailSchedule(alanyaID);
-    const payload = _formatSchedule(next);
+    const payload = _formatSchedule(next, new Date(), { locked: !droit });
 
     // Aux autres appareils du même compte : la planification est par compte,
     // le bandeau est par appareil.
@@ -157,4 +187,5 @@ module.exports = {
   patchVoicemailSchedule,
   _formatSchedule,
   _normalizePatch,
+  _allume,
 };

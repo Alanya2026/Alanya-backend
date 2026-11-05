@@ -20,10 +20,11 @@ const FEATURE = Object.freeze({
   LIST_RINGTONES: 'list_ringtones',
   STYLE: 'style',
   VERIFIED_BADGE: 'verified_badge',
-  // Déclaré au catalogue avec `is_paid = 0` (migration 087) : le code existe
-  // pour que la bascule au payant soit un réglage, pas une migration. Aucun
-  // `requireFeature` ne s'en sert aujourd'hui.
+  // Payant depuis le back-office (03/10/2026), dans les plans depuis la
+  // migration 114. Gardé à l'allumage (PATCH /auth/voicemail-schedule) et à
+  // l'interception (voicemailScheduleService), jamais à la lecture.
   VOICEMAIL: 'voicemail',
+  VIDEO_HD: 'video_hd',
 });
 
 /**

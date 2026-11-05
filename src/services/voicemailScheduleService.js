@@ -406,6 +406,46 @@ const isCallerAllowedToRing = async (bypassListId, callerID) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Droit Alanya Plus
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Le compte a-t-il droit au répondeur (`voicemail`, migration 114) ?
+ *
+ * Ouvert pendant l'essai ; ensuite, seul un plan qui le liste le rouvre. Ne
+ * ferme jamais faute de calcul, comme `requireFeature` : droits introuvables,
+ * le répondeur fait ce que son réglage dit. Chargé à la demande — et
+ * remplaçable par [_setVoicemailRightChecker] dans les tests, qui simulent la
+ * base sans les tables de l'offre.
+ */
+let _voicemailRight = async (alanyaID) => {
+  const { entitlementsOrNull } = require('./billing/entitlements');
+  const { FEATURE } = require('../constants/billing');
+  const droits = await entitlementsOrNull(alanyaID);
+  return !droits || droits.features?.[FEATURE.VOICEMAIL] !== false;
+};
+
+const hasVoicemailRight = (alanyaID) => _voicemailRight(alanyaID);
+
+const _setVoicemailRightChecker = (fn) => { _voicemailRight = fn; };
+
+/**
+ * Le créneau tel qu'il s'applique aux appels : éteint sans le droit.
+ *
+ * Le réglage en base n'est pas touché — il reprend dès le paiement. On ne
+ * demande les droits que si le créneau ferait quelque chose : l'écrasante
+ * majorité des appels n'a aucun répondeur armé.
+ */
+const _scheduleForCalls = async (alanyaID, schedule, now) => {
+  const arme = isVoicemailActive(schedule, now, schedule.resolvedTimezone)
+    || isNoAnswerEnabled(schedule);
+  if (!arme || await hasVoicemailRight(alanyaID)) return schedule;
+  return {
+    ...schedule, enabled: 0, untilAt: null, slots: [], no_answer_enabled: 0,
+  };
+};
+
 /**
  * La décision, pour un appel entrant : faut-il intercepter ?
  *
@@ -415,7 +455,9 @@ const isCallerAllowedToRing = async (bypassListId, callerID) => {
  * majorité des appels, qui n'en déclenchent aucun.
  */
 const shouldInterceptCall = async (targetID, callerID, now = new Date()) => {
-  const schedule = await loadUserVoicemailSchedule(targetID);
+  const schedule = await _scheduleForCalls(
+    targetID, await loadUserVoicemailSchedule(targetID), now,
+  );
   if (!isVoicemailActive(schedule, now, schedule.resolvedTimezone)) {
     return { intercept: false, schedule };
   }
@@ -439,8 +481,10 @@ const shouldInterceptCall = async (targetID, callerID, now = new Date()) => {
  * peut faire sonner malgré le silence. Sur ces trois chemins le téléphone a
  * sonné — ou aurait sonné — pour tout le monde, il n'y a rien à contourner.
  */
-const shouldFallBackToVoicemail = async (targetID) => {
-  const schedule = await loadUserVoicemailSchedule(targetID);
+const shouldFallBackToVoicemail = async (targetID, now = new Date()) => {
+  const schedule = await _scheduleForCalls(
+    targetID, await loadUserVoicemailSchedule(targetID), now,
+  );
   return { fallback: isNoAnswerEnabled(schedule), schedule };
 };
 
@@ -464,5 +508,7 @@ module.exports = {
   isCallerAllowedToRing,
   shouldInterceptCall,
   shouldFallBackToVoicemail,
+  hasVoicemailRight,
+  _setVoicemailRightChecker,
   _wallToInstant,
 };
