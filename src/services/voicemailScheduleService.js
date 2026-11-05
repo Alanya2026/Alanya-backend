@@ -411,7 +411,7 @@ const isCallerAllowedToRing = async (bypassListId, callerID) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Le compte a-t-il droit au répondeur (`voicemail`, migration 113) ?
+ * Le compte a-t-il droit au répondeur (`voicemail`, migration 114) ?
  *
  * Ouvert pendant l'essai ; ensuite, seul un plan qui le liste le rouvre. Ne
  * ferme jamais faute de calcul, comme `requireFeature` : droits introuvables,

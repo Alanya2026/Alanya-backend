@@ -21,7 +21,7 @@ const FEATURE = Object.freeze({
   STYLE: 'style',
   VERIFIED_BADGE: 'verified_badge',
   // Payant depuis le back-office (03/10/2026), dans les plans depuis la
-  // migration 113. Gardé à l'allumage (PATCH /auth/voicemail-schedule) et à
+  // migration 114. Gardé à l'allumage (PATCH /auth/voicemail-schedule) et à
   // l'interception (voicemailScheduleService), jamais à la lecture.
   VOICEMAIL: 'voicemail',
   VIDEO_HD: 'video_hd',
