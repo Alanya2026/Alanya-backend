@@ -25,6 +25,9 @@ const FEATURE = Object.freeze({
   // l'interception (voicemailScheduleService), jamais à la lecture.
   VOICEMAIL: 'voicemail',
   VIDEO_HD: 'video_hd',
+  // Migration 115. Gardé à l'allumage (PATCH /auth/privacy-prefs) et à chaque
+  // appel (privacyPrefsService.canCallUser), jamais à la lecture.
+  CALL_FILTER: 'call_filter',
 });
 
 /**

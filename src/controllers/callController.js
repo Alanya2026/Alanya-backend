@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { isBlockedEitherWay } = require('../utils/blockUtils');
+const { canCallUser } = require('../services/privacyPrefsService');
 const { isOfficialAccount } = require('../utils/officialAccountGuard');
 const { getClientIp, parseCallMode } = require('../utils/clientIp');
 const { processRejectCall } = require('../socket/handlers/calls');
@@ -77,6 +78,11 @@ const createCall = async (req, res) => {
     }
 
     if (await isBlockedEitherWay(idCaller, idReceiver)) {
+      return res.status(403).json({ error: 'Appel impossible', code: 'CALL_BLOCKED' });
+    }
+
+    // Filtre d'appels du destinataire : même refus que sur `call_user`.
+    if (!(await canCallUser(idCaller, idReceiver))) {
       return res.status(403).json({ error: 'Appel impossible', code: 'CALL_BLOCKED' });
     }
 

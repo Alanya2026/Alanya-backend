@@ -18,6 +18,7 @@
         "test:repondeur": "NODE_ENV=test node src/services/voicemailScheduleService.test.js && NODE_ENV=test node src/socket/state/voicemailNotice.test.js && NODE_ENV=test node src/socket/handlers/voicemailIntercept.test.js && NODE_ENV=test node src/socket/handlers/voicemailNoAnswer.test.js && NODE_ENV=test node src/socket/handlers/voicemailRejectBusy.test.js",
         "test:backup": "NODE_ENV=test node src/services/backupKey.test.js && NODE_ENV=test node src/services/backupKeyAudit.test.js && NODE_ENV=test node src/controllers/admin/backupKeys.test.js",
         "test:turn": "NODE_ENV=test node src/utils/turnFallback.test.js",
+        "test:filtre-appels": "NODE_ENV=test node src/socket/handlers/callFilter.test.js",
         "test:mail": "NODE_ENV=test node src/services/mailService.test.js",
         "test:legal": "NODE_ENV=test node src/controllers/legalController.test.js",
         "test:qr": "NODE_ENV=test node src/socket/state/qrLoginSessions.test.js && NODE_ENV=test node src/socket/state/qrContactTokens.test.js && NODE_ENV=test node src/controllers/qrAuthAccessLog.test.js",

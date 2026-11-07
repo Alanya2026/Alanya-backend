@@ -17,6 +17,7 @@ const DEFAULT_PREFS = Object.freeze({
   profilePhotoVisibility: 'everyone',
   addMePolicy: 'everyone',
   previewMode: 'full',
+  callsFromContactsOnly: 0,
 });
 
 const _normalizeRow = (row) => ({
@@ -123,14 +124,57 @@ const canAddUser = async (actorId, targetId) => {
   return _isContactOf(targetId, actorId);
 };
 
+/**
+ * Le compte a-t-il droit au filtre d'appels (`call_filter`, migration 115) ?
+ *
+ * Ouvert pendant l'essai ; ensuite, seul un plan qui le liste le rouvre. Ne
+ * ferme jamais faute de calcul, comme `requireFeature` : droits introuvables,
+ * le filtre fait ce que son réglage dit. Chargé à la demande, et remplaçable
+ * par [_setCallFilterRightChecker] dans les tests, qui simulent la base sans
+ * les tables de l'offre.
+ */
+let _callFilterRight = async (alanyaID) => {
+  const { entitlementsOrNull } = require('./billing/entitlements');
+  const { FEATURE } = require('../constants/billing');
+  const droits = await entitlementsOrNull(alanyaID);
+  return !droits || droits.features?.[FEATURE.CALL_FILTER] !== false;
+};
+
+const hasCallFilterRight = (alanyaID) => _callFilterRight(alanyaID);
+
+const _setCallFilterRightChecker = (fn) => { _callFilterRight = fn; };
+
+/**
+ * L'appelant peut-il faire sonner la cible ?
+ *
+ * Répond non seulement si la cible a allumé le filtre, si l'appelant n'est pas
+ * dans ses contacts, et si elle a encore droit au filtre. Le réglage en base
+ * n'est pas touché quand le droit manque : il reprend dès le paiement.
+ *
+ * Les questions sont posées de la moins chère à la plus chère : l'écrasante
+ * majorité des appels s'arrête à la première, sans calcul de droits.
+ */
+const canCallUser = async (callerId, targetId) => {
+  if (Number(callerId) === Number(targetId)) return true;
+
+  const prefs = await loadUserPrivacyPrefs(targetId);
+  if (!Number(prefs.callsFromContactsOnly)) return true;
+  if (await _isContactOf(targetId, callerId)) return true;
+
+  return !(await hasCallFilterRight(targetId));
+};
+
 const upsertUserPrivacyPrefs = async (alanyaID, patch = {}) => {
   const current = await loadUserPrivacyPrefs(alanyaID);
   const next = { ...current, ...patch };
+  // Colonne de la migration 115 : écrite seulement quand on la change, pour que
+  // les autres réglages s'enregistrent encore sur une base pas encore migrée.
+  const avecFiltre = patch.callsFromContactsOnly !== undefined;
   await pool.execute(
     `INSERT INTO user_privacy_prefs
        (alanyaID, lastSeenVisibility, onlineVisibility, readReceiptsEnabled,
-        profilePhotoVisibility, addMePolicy, previewMode)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+        profilePhotoVisibility, addMePolicy, previewMode${avecFiltre ? ', callsFromContactsOnly' : ''})
+     VALUES (?, ?, ?, ?, ?, ?, ?${avecFiltre ? ', ?' : ''})
      ON DUPLICATE KEY UPDATE
        lastSeenVisibility = VALUES(lastSeenVisibility),
        onlineVisibility = VALUES(onlineVisibility),
@@ -138,6 +182,7 @@ const upsertUserPrivacyPrefs = async (alanyaID, patch = {}) => {
        profilePhotoVisibility = VALUES(profilePhotoVisibility),
        addMePolicy = VALUES(addMePolicy),
        previewMode = VALUES(previewMode),
+       ${avecFiltre ? 'callsFromContactsOnly = VALUES(callsFromContactsOnly),' : ''}
        updatedAt = NOW()`,
     [
       alanyaID,
@@ -147,6 +192,7 @@ const upsertUserPrivacyPrefs = async (alanyaID, patch = {}) => {
       visibilityToInt(next.profilePhotoVisibility),
       visibilityToInt(next.addMePolicy),
       previewModeToInt(next.previewMode),
+      ...(avecFiltre ? [next.callsFromContactsOnly ? 1 : 0] : []),
     ],
   );
   return next;
@@ -161,8 +207,11 @@ module.exports = {
   upsertUserPrivacyPrefs,
   canViewProfileField,
   canAddUser,
+  canCallUser,
+  hasCallFilterRight,
   contactsAmong,
   _passesVisibility,
   _isContactOf,
   _normalizeRow,
+  _setCallFilterRightChecker,
 };

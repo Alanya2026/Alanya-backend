@@ -52,6 +52,7 @@ jobs:
           npm run test:stickers
           npm run test:sensible
           npm run test:turn
+          npm run test:filtre-appels
 
   deploy:
     needs: tests
