@@ -151,6 +151,12 @@ const SUPER_ADMIN_ONLY = [
   // l'admin.
   'stickers.publish',
   'stickers.settings',
+  // Enquête sur une copie signée de document sensible : n'importe quelle
+  // empreinte, avec la session, les autres comptes de l'appareil et
+  // l'historique complet du document. Pouvoir de surveillance — au
+  // super-admin seul, avec un motif à chaque recherche, journalisée même
+  // quand l'empreinte est inconnue (controllers/admin/documentsSensibles.js).
+  'documents.trace',
 ];
 
 const ROLE_USER = 0;

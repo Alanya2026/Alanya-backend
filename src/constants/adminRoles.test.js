@@ -39,6 +39,8 @@ assert.strictEqual(can(ROLE_ADMIN, 'billing.codes'), false, 'générer des codes
 assert.strictEqual(can(ROLE_SUPER_ADMIN, 'billing.codes'), true);
 assert.strictEqual(can(ROLE_ADMIN, 'billing.read'), true, 'lister les codes : lecture');
 // Ce que l'admin garde : lire, diagnostiquer, retirer un contenu.
+assert.strictEqual(can(ROLE_ADMIN, 'documents.trace'), false, 'enquête par empreinte : super-admin');
+assert.strictEqual(can(ROLE_SUPER_ADMIN, 'documents.trace'), true);
 assert.strictEqual(can(ROLE_ADMIN, 'users.read'), true);
 assert.strictEqual(can(ROLE_ADMIN, 'audit.read'), true);
 assert.strictEqual(can(ROLE_ADMIN, 'media.delete'), true);

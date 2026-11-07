@@ -19,6 +19,10 @@ const {
 const { getServiceHealth } = require('../controllers/admin/health');
 const { getAudit, getAuditActions } = require('../controllers/admin/audit');
 const {
+  verifierEmpreinteAdmin,
+  resumeDocumentsSensiblesUtilisateur,
+} = require('../controllers/admin/documentsSensibles');
+const {
   getBackupKeyAccess,
   getBackupKeyAccessSummary,
 } = require('../controllers/admin/backupAccess');
@@ -837,6 +841,50 @@ router.get('/backup/key-usage',             adminAuth, requirePermission('stats.
 router.get('/backup/keys',                  adminAuth, requirePermission('settings.read'), getKeys);
 router.post('/backup/keys',                 adminAuth, requirePermission('backup.keys'), rotateKey);
 router.post('/backup/keys/:kid/retire',     adminAuth, requirePermission('backup.keys'), retireKey);
+
+/**
+ * @swagger
+ * /api/admin/documents-sensibles/empreintes/{code}/verification:
+ *   post:
+ *     summary: "Enquête sur une copie signée : auteur, session, document et historique complet (super-admin, motif obligatoire, journalisée)"
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Fiche de la copie
+ *       400:
+ *         description: REASON_REQUIRED
+ *       404:
+ *         description: FINGERPRINT_NOT_FOUND (la recherche est quand même journalisée)
+ *       422:
+ *         description: INVALID_FINGERPRINT
+ * /api/admin/users/{id}/documents-sensibles:
+ *   get:
+ *     summary: "Nombre de consultations et de copies signées d'un compte (sans empreinte)"
+ *     tags: [Admin]
+ */
+// POST : le motif voyage dans le corps, jamais dans l'URL.
+router.post('/documents-sensibles/empreintes/:code/verification',
+  adminAuth, requirePermission('documents.trace'), verifierEmpreinteAdmin);
+router.get('/users/:id/documents-sensibles',
+  adminAuth, requirePermission('documents.trace'), resumeDocumentsSensiblesUtilisateur);
 
 // ── File de modération ──
 router.get('/reports',                     adminAuth, requirePermission('reports.read'), getReports);
