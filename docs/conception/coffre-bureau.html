@@ -371,10 +371,39 @@
           </tbody>
         </table>
       </div>
-      <p>Mises à jour de la version 1 : une page de téléchargement, et l'application signale une nouvelle version au démarrage.</p>
+      <p>Le dépôt est privé : ses pages de téléchargement GitHub ne sont pas ouvertes au public. Les fichiers sont donc servis par le VPS (gratuit : le serveur est déjà payé), derrière une page <code>alanya237.com/coffre</code>. Environ 20 à 40 Mo par système et par version. Variante : un bucket public R2, gratuit dans la limite du palier offert.</p>
+
+      <h3>Ce que fait un inscrit, sous Windows</h3>
+      <ol class="steps">
+        <li><div class="step"><p>Il ouvre la page de téléchargement et clique « Télécharger pour Windows » : <code>AlanyaCoffre-Setup-1.0.0.exe</code>.</p></div></li>
+        <li><div class="step"><p>Il lance le fichier. Windows affiche « Windows a protégé votre ordinateur » (installateur non signé) : <strong>Informations complémentaires › Exécuter quand même</strong>. La page l'explique avec une capture.</p></div></li>
+        <li><div class="step"><p>L'installateur ajoute « Alanya Coffre-fort » au menu Démarrer (raccourci sur le bureau au choix). Désinstallation par les Paramètres de Windows.</p></div></li>
+        <li><div class="step"><p>Il ouvre l'application et scanne le code QR avec Alanya sur son téléphone (Compte et sécurité › Lier un nouvel appareil).</p></div></li>
+      </ol>
+
+      <h3>Ce que fait un inscrit, sous Linux</h3>
+      <ol class="steps">
+        <li><div class="step"><p><strong>Ubuntu, Debian, Mint</strong> : il télécharge <code>alanya-coffre_1.0.0_amd64.deb</code> et l'ouvre d'un double-clic ; la logithèque l'installe, l'application apparaît dans le menu.</p></div></li>
+        <li><div class="step"><p><strong>Autres distributions</strong> : il télécharge <code>AlanyaCoffre-1.0.0.AppImage</code>, autorise son exécution (clic droit › Propriétés) et l'ouvre. Rien à installer.</p></div></li>
+        <li><div class="step"><p>Il scanne le code QR avec son téléphone, comme sous Windows.</p></div></li>
+      </ol>
+
+      <h3>Ce que nous faisons à chaque version</h3>
+      <ol class="steps">
+        <li><div class="step"><p><strong>Construire</strong> : GitHub Actions construit l'installateur Windows (Inno Setup), le <code>.deb</code> et l'AppImage (machine Ubuntu) à partir d'une étiquette de version.</p><p class="sub">Le fichier de workflow touche <code>.github/workflows</code> : le jeton GitHub a le droit nécessaire.</p></div></li>
+        <li><div class="step"><p><strong>Essayer</strong> l'installateur sur un PC Windows et le <code>.deb</code> sur une Ubuntu propre (connexion QR, parcours, téléchargement).</p></div></li>
+        <li><div class="step"><p><strong>Publier</strong> : déposer les trois fichiers sur le VPS, mettre à jour la page de téléchargement et le fichier de version (<code>version.json</code> : numéro, adresses, notes).</p></div></li>
+        <li><div class="step"><p><strong>Prévenir</strong> : au démarrage, l'application lit <code>version.json</code> et affiche « Nouvelle version disponible » avec le lien ; l'inscrit réinstalle par-dessus, sans perdre sa connexion. Pas de mise à jour automatique en version 1.</p></div></li>
+      </ol>
+      <p>Pour le faire connaître : un lien « Coffre-fort sur ordinateur » dans les réglages du coffre de l'application mobile, vers la page de téléchargement.</p>
+
       <div class="note-box">
-        <div class="lbl">Avant de commencer, sur le poste Linux</div>
-        <p>Flutter ne peut pas encore construire pour Linux sur ce poste (<code>flutter doctor</code> : outils manquants). À installer une fois : <code>sudo apt install pkg-config clang cmake ninja-build libgtk-3-dev libsecret-1-dev libmpv-dev</code>.</p>
+        <div class="lbl">Limites et pistes</div>
+        <p>Seuls les PC 64 bits classiques (x64) ; les PC à puce ARM plus tard. L'avertissement de Windows ne disparaît qu'avec un certificat de signature (payant, pas prévu) ou par le Microsoft Store (inscription des développeurs individuels gratuite, à vérifier ; validation de Microsoft à chaque version). Côté Linux, Snap Store ou Flathub plus tard (gratuits).</p>
+      </div>
+      <div class="note-box">
+        <div class="lbl">Poste de développement Linux</div>
+        <p>Outils installés le 10/11 (<code>pkg-config clang cmake ninja-build libgtk-3-dev libsecret-1-dev libmpv-dev</code>). Lancer pour essayer : <code>flutter run -d linux</code> dans <code>desktop/</code>, ou <code>flutter build linux --release</code> puis <code>build/linux/x64/release/bundle/alanya_coffre</code>.</p>
       </div>
     </div>
   </section>
@@ -384,13 +413,13 @@
     <div class="col">
       <h2>Les lots</h2>
       <ol class="steps">
-        <li><div class="step"><p><strong>Lot D1 · le paquet commun</strong> <span class="chip todo">à faire</span></p><p class="sub">Sortir le code du coffre de l'app mobile dans <code>packages/alanya_safebox</code>, avec l'interface HTTP. Aucun changement visible ; tous les tests de l'app mobile passent.</p></div></li>
-        <li><div class="step"><p><strong>Lot D2 · l'application et la connexion</strong> <span class="chip todo">à faire</span></p><p class="sub">Projet <code>desktop/</code>, fenêtre et barre latérale, connexion par QR code, accueil et espace, parcours des dossiers en lecture. Sous Linux d'abord.</p></div></li>
+        <li><div class="step"><p><strong>Lot D1 · le paquet commun</strong> <span class="chip ok">fait le 10/11</span></p><p class="sub">Sortir le code du coffre de l'app mobile dans <code>packages/alanya_safebox</code>, avec l'interface HTTP. Aucun changement visible ; tous les tests de l'app mobile passent.</p></div></li>
+        <li><div class="step"><p><strong>Lot D2 · l'application et la connexion</strong> <span class="chip ok">fait le 10/11</span></p><p class="sub">Projet <code>desktop/</code>, fenêtre et barre latérale, connexion par QR code, accueil et espace, parcours des dossiers en lecture. Sous Linux d'abord.</p></div></li>
         <li><div class="step"><p><strong>Lot D3 · regarder et télécharger</strong> <span class="chip todo">à faire</span></p><p class="sub">Visionneuse (photos, vidéos par media_kit), commentaires, téléchargement de fichiers et de dossiers vers le PC, Partager en lecture.</p></div></li>
         <li><div class="step"><p><strong>Lot D4 · ajouter</strong> <span class="chip todo">à faire</span></p><p class="sub">Glisser-déposer, aperçus des photos, envois et transferts, empreintes pour ne rien renvoyer.</p></div></li>
         <li><div class="step"><p><strong>Lot D5 · ranger</strong> <span class="chip todo">à faire</span></p><p class="sub">Dossiers et albums, sélection multiple, clic droit et raccourcis, corbeille, libérer de l'espace.</p></div></li>
         <li><div class="step"><p><strong>Lot D6 · sauvegarder un dossier du PC</strong> <span class="chip todo">à faire</span></p><p class="sub">Choix des dossiers, premier passage avec estimation, surveillance et passages réguliers, réglages.</p></div></li>
-        <li><div class="step"><p><strong>Lot D7 · Windows et mise en service</strong> <span class="chip todo">à faire</span></p><p class="sub">Construction Windows sur GitHub Actions, installateur, paquets Linux, page de téléchargement, essais sur Windows et Linux.</p></div></li>
+        <li><div class="step"><p><strong>Lot D7 · Windows et mise en service</strong> <span class="chip todo">à faire</span></p><p class="sub">Construction Windows et Linux sur GitHub Actions, installateur, paquets Linux, page de téléchargement et <code>version.json</code> sur le VPS, avis de nouvelle version dans l'application, lien depuis l'application mobile, essais sur Windows et Linux (voir 09).</p></div></li>
       </ol>
     </div>
   </section>
