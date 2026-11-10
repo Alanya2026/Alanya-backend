@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Coffre-fort sur ordinateur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  /* Même charte que les documents « Médias Backblaze » et « Trois buckets » :
+     colonne de lecture avec numéro de section en marge, tableaux et encadrés sobres. */
+  :root {
+    --ground:    #E9EBEE;
+    --surface:   #F8F9FA;
+    --surface-2: #DFE3E7;
+    --ink:       #161B21;
+    --ink-soft:  #3D4750;
+    --muted:     #626D77;
+    --rule:      #CBD1D7;
+    --rule-soft: #DDE1E6;
+    --keep:      #1C6560;
+    --keep-bg:   #DDE8E6;
+    --drop:      #99511C;
+    --drop-bg:   #EFE2D6;
+    --alarm:     #962C2C;
+    --alarm-bg:  #EFDCDC;
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body:    "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono:    "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground:    #12161A;
+      --surface:   #1A1F25;
+      --surface-2: #242B32;
+      --ink:       #E5E9EC;
+      --ink-soft:  #C0C8CF;
+      --muted:     #8D99A3;
+      --rule:      #2C343C;
+      --rule-soft: #232A31;
+      --keep:      #5FB9B1;
+      --keep-bg:   #17302E;
+      --drop:      #D9944F;
+      --drop-bg:   #33261A;
+      --alarm:     #E08279;
+      --alarm-bg:  #35201F;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground:    #12161A;
+    --surface:   #1A1F25;
+    --surface-2: #242B32;
+    --ink:       #E5E9EC;
+    --ink-soft:  #C0C8CF;
+    --muted:     #8D99A3;
+    --rule:      #2C343C;
+    --rule-soft: #232A31;
+    --keep:      #5FB9B1;
+    --keep-bg:   #17302E;
+    --drop:      #D9944F;
+    --drop-bg:   #33261A;
+    --alarm:     #E08279;
+    --alarm-bg:  #35201F;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, p, ul, ol, pre, figure { margin: 0; }
+
+  .page { max-width: 1140px; margin: 0 auto; padding: 56px 20px 120px; }
+  @media (min-width: 700px) { .page { padding-left: 28px; padding-right: 28px; } }
+
+  .band { display: grid; grid-template-columns: 1fr; }
+  @media (min-width: 940px) {
+    .band { grid-template-columns: 108px minmax(0, 1fr); column-gap: 40px; }
+  }
+  .band > .gutter { display: none; }
+  @media (min-width: 940px) { .band > .gutter { display: block; } }
+
+  .col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  .col > p, .col > ul.plain { max-width: 68ch; }
+
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 26px; margin-bottom: 34px; display: flex; flex-direction: column; gap: 16px; }
+  .kicker { font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  h1 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(34px, 5.4vw, 58px); line-height: 1.02;
+    letter-spacing: -.025em; text-wrap: balance;
+  }
+  .standfirst { font-size: 20px; line-height: 1.5; color: var(--ink-soft); max-width: 62ch; }
+
+  .decisions { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin: 0 0 60px; }
+  @media (min-width: 780px) { .decisions { grid-template-columns: repeat(2, 1fr); } }
+  .decision { background: var(--surface); padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 7px; }
+  .lbl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .decision .val { font-family: var(--display); font-weight: 600; font-size: 17px; line-height: 1.28; letter-spacing: -.01em; }
+  .decision .note { font-size: 14.5px; color: var(--muted); line-height: 1.45; }
+
+  section { margin-bottom: 66px; }
+  .gutter .num { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; color: var(--muted); padding-top: 10px; border-top: 1px solid var(--rule); display: block; }
+  h2 {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(24px, 3vw, 31px); line-height: 1.12; letter-spacing: -.02em;
+    text-wrap: balance; padding-top: 8px; border-top: 1px solid var(--rule);
+  }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 18.5px; letter-spacing: -.008em; margin-top: 12px; text-wrap: balance; }
+  strong { font-weight: 600; color: var(--ink); }
+
+  code { font-family: var(--mono); font-size: .855em; background: var(--surface-2); padding: .12em .38em; border-radius: 2px; word-break: break-word; }
+
+  .chip {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em;
+    text-transform: uppercase; border: 1px solid currentColor;
+    padding: 0 6px; border-radius: 2px; white-space: nowrap; vertical-align: 2px;
+  }
+  .chip.ok { color: var(--keep); }
+  .chip.todo { color: var(--drop); }
+  .chip.risk { color: var(--alarm); }
+
+  figure { background: var(--surface); border: 1px solid var(--rule); padding: 26px 24px 18px; overflow-x: auto; margin: 10px 0; }
+  figure svg { display: block; width: 100%; min-width: 700px; height: auto; color: var(--ink); }
+  figcaption { margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--rule-soft); font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+  .d-box { fill: var(--surface); stroke: var(--ink); stroke-width: 1.4; }
+  .d-box-keep { fill: var(--keep-bg); stroke: var(--keep); stroke-width: 1.6; }
+  .d-life { stroke: var(--rule); stroke-width: 1.4; stroke-dasharray: 4 4; fill: none; }
+  .d-line { stroke: var(--ink); stroke-width: 1.4; fill: none; }
+  .d-line-keep { stroke: var(--keep); stroke-width: 2.2; fill: none; }
+  .d-txt-s { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .03em; }
+  .d-txt-m { fill: var(--ink-soft); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; }
+  .d-txt-b { fill: var(--ink); font-family: "Archivo", sans-serif; font-weight: 600; font-size: 13px; }
+  .d-txt-keep { fill: var(--keep); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: .02em; }
+  .m-ink { fill: var(--ink); }
+  .m-keep { fill: var(--keep); }
+
+  pre {
+    background: var(--surface); border: 1px solid var(--rule); border-left: 3px solid var(--keep);
+    padding: 16px 18px; overflow-x: auto;
+    font-family: var(--mono); font-size: 13px; line-height: 1.66; color: var(--ink-soft);
+  }
+  pre .c { color: var(--muted); }
+  pre .k { color: var(--keep); }
+
+  ol.steps { list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 18px; padding: 0; max-width: 74ch; }
+  ol.steps > li { counter-increment: s; display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: 16px; align-items: start; }
+  ol.steps > li::before {
+    content: counter(s); font-family: var(--mono); font-size: 12px; color: var(--keep);
+    border: 1px solid var(--keep); width: 26px; height: 26px;
+    display: grid; place-items: center; border-radius: 50%; margin-top: 2px;
+  }
+  ol.steps .step { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  ol.steps .step p { font-size: 16px; }
+  ol.steps .step p.sub { font-size: 15px; color: var(--muted); }
+
+  ul.plain { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+  ul.plain li::marker { color: var(--muted); }
+
+  .callout, .note-box { border: 1px solid var(--rule); padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 80ch; }
+  .callout { border-left: 3px solid var(--alarm); background: var(--alarm-bg); }
+  .callout .lbl { color: var(--alarm); }
+  .note-box { border-left: 3px solid var(--keep); background: var(--surface); }
+  .note-box .lbl { color: var(--keep); }
+  .callout p, .note-box p { font-size: 15.5px; line-height: 1.55; }
+
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; min-width: 680px; background: var(--surface); }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--rule-soft); font-size: 15px; line-height: 1.5; vertical-align: top; }
+  th { font-family: var(--display); font-weight: 600; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); }
+  td:first-child { font-family: var(--mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  .tbl-prose td:first-child { font-family: var(--display); font-weight: 600; font-size: 14.5px; white-space: normal; min-width: 150px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .open { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  @media (min-width: 780px) { .open { grid-template-columns: repeat(2, 1fr); } }
+  .open > div { background: var(--surface); padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .open h3 { margin: 0; font-size: 16.5px; }
+  .open p { font-size: 15px; line-height: 1.52; color: var(--ink-soft); }
+  .open p.reco { color: var(--keep); font-size: 14.5px; }
+
+  a { color: var(--keep); }
+  :focus-visible { outline: 2px solid var(--keep); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="kicker">Alanya · application de bureau, paquet commun et app mobile · conception · 10/11/2026 · version 1</div>
+    <h1>Le coffre-fort sur ordinateur</h1>
+    <p class="standfirst">Une petite application pour Windows et Linux qui ouvre le coffre-fort de l'inscrit sur son ordinateur : parcourir et regarder ses fichiers, en ajouter par glisser-déposer, les télécharger, les ranger, et sauvegarder un dossier du PC. Elle se connecte en scannant un QR code avec le téléphone, et partage tout le code du coffre avec l'app mobile.</p>
+  </header>
+
+  <div class="decisions">
+    <div class="decision">
+      <div class="lbl">Plateformes</div>
+      <div class="val">Windows et Linux</div>
+      <div class="note">Windows pour la plupart des inscrits, Linux pour les essais sur le poste de développement. Pas de macOS : il demande un Mac et un compte Apple payant.</div>
+    </div>
+    <div class="decision">
+      <div class="lbl">Connexion</div>
+      <div class="val">QR code scanné avec le téléphone</div>
+      <div class="note">Comme WhatsApp Web. Le serveur et l'app mobile le savent déjà ; aucun mot de passe tapé sur l'ordinateur.</div>
+    </div>
+    <div class="decision">
+      <div class="lbl">Technologie</div>
+      <div class="val">Flutter, avec un paquet commun</div>
+      <div class="note">Le chiffrement SBX1, les modèles, l'API du coffre, les envois et les téléchargements sortent de l'app mobile dans un paquet Dart utilisé par les deux applications.</div>
+    </div>
+    <div class="decision">
+      <div class="lbl">Première version</div>
+      <div class="val">Parcourir, ajouter, télécharger, ranger, sauvegarder un dossier</div>
+      <div class="note">Choix du 10/11. Pas d'envoi dans une discussion ni de compression vidéo dans cette version.</div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="gutter"><span class="num">01</span></div>
+    <div class="col">
+      <h2>Ce que l'application fait, et ce qu'elle ne fait pas</h2>
+      <p>C'est le coffre-fort, seul. Les discussions, les appels et le reste d'Alanya restent sur le téléphone.</p>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Fonction</th><th>Version 1</th><th>Plus tard</th></tr></thead>
+          <tbody>
+            <tr><td>Parcourir</td><td>Les six dossiers, les albums et leurs sous-dossiers, l'espace utilisé, Partager (mes envois et reçus, en lecture)</td><td>Recherche par nom</td></tr>
+            <tr><td>Regarder</td><td>Visionneuse des photos et vidéos, avec les commentaires texte et audio</td><td>Lecture d'une vidéo pendant son arrivée</td></tr>
+            <tr><td>Ajouter</td><td>Glisser-déposer des fichiers et des dossiers, en Original</td><td>HD et Compressé (compression sur l'ordinateur)</td></tr>
+            <tr><td>Télécharger</td><td>Des fichiers ou un dossier entier vers un dossier du PC, déchiffrés sur l'ordinateur</td><td>—</td></tr>
+            <tr><td>Ranger</td><td>Créer, renommer, déplacer des dossiers et des albums, sélection multiple, corbeille, libérer de l'espace</td><td>—</td></tr>
+            <tr><td>Sauvegarder le PC</td><td>Un ou plusieurs dossiers du PC copiés dans le coffre, dans un seul sens</td><td>Lancement au démarrage, icône près de l'horloge</td></tr>
+            <tr><td>Partager</td><td>—</td><td>Envoyer un fichier ou un album dans une discussion</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">02</span></div>
+    <div class="col">
+      <h2>La connexion par QR code</h2>
+      <p>Tout existe déjà côté serveur (<code>/api/auth/qr-session</code>, plateformes <code>windows</code> et <code>linux</code> acceptées) et dans l'app mobile (Profil › Scanner un QR code › écran de confirmation). Aucun changement du serveur n'est nécessaire.</p>
+      <ol class="steps">
+        <li><div class="step"><p><strong>L'ordinateur demande une session</strong> : <code>POST /api/auth/qr-session</code> avec le nom de l'ordinateur et sa plateforme. Il reçoit un identifiant, un jeton de suivi et le contenu du QR code, valable quelques minutes.</p></div></li>
+        <li><div class="step"><p><strong>Il affiche le QR code</strong> avec l'explication : « Ouvrez Alanya sur votre téléphone, Profil › Scanner un QR code ». Un QR expiré se renouvelle tout seul.</p></div></li>
+        <li><div class="step"><p><strong>Le téléphone scanne et l'inscrit approuve</strong> sur l'écran de confirmation qui existe déjà (nom et type de l'ordinateur).</p></div></li>
+        <li><div class="step"><p><strong>L'ordinateur reçoit ses jetons</strong> en interrogeant la session toutes les deux secondes. Ils sont rangés dans le coffre de mots de passe du système (Gestionnaire d'identifiants de Windows, trousseau libsecret sous Linux), jamais dans un fichier en clair.</p></div></li>
+        <li><div class="step"><p><strong>L'ordinateur apparaît dans « Appareils connectés »</strong> sur le téléphone, et s'y déconnecte comme les autres. Un ordinateur déconnecté reçoit un refus du serveur et revient à l'écran du QR code.</p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">03</span></div>
+    <div class="col">
+      <h2>Les écrans</h2>
+      <ul class="plain">
+        <li><strong>Une fenêtre, une barre à gauche</strong> : Accueil (espace utilisé, état des envois et de la sauvegarde du PC), Photos, Vidéos, Audio, Documents, Albums, Partager, Corbeille, Transferts, Réglages.</li>
+        <li><strong>Au centre, le dossier</strong> : photos et vidéos en grille par jour, les autres en liste, avec les mêmes filtres que le téléphone (type, dossier d'origine, « Avec commentaire »).</li>
+        <li><strong>Glisser-déposer</strong> depuis l'explorateur de fichiers vers un dossier ; un bouton « Ajouter » ouvre aussi le sélecteur du système.</li>
+        <li><strong>Clavier et souris</strong> : double-clic pour ouvrir, Ctrl ou Maj + clic pour sélectionner, Ctrl+A, Suppr vers la corbeille, F2 pour renommer, clic droit pour le menu d'un fichier ou d'un dossier.</li>
+        <li><strong>La visionneuse</strong> occupe la fenêtre : flèches gauche et droite, molette pour zoomer, Échap pour sortir, commentaire en bas.</li>
+        <li><strong>Les transferts</strong> en bas de la fenêtre pendant un envoi ou un téléchargement : débit, pause, annuler.</li>
+        <li><strong>Les textes</strong> reprennent ceux de l'app mobile, en français, anglais et chinois ; « SafeBox » en anglais.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">04</span></div>
+    <div class="col">
+      <h2>Ajouter et télécharger</h2>
+      <ul class="plain">
+        <li><strong>Le même chemin que le téléphone</strong> : réservation de la place, chiffrement SBX1 sur l'ordinateur, envoi direct chez MEGA, trois blocs à la fois, pause et reprise, fin vérifiée par le serveur. C'est le code du paquet commun, pas une copie.</li>
+        <li><strong>En Original seulement</strong> dans cette version : la compression vidéo du téléphone passe par Android. Une photo, un audio ou un document part tel quel.</li>
+        <li><strong>Un dossier déposé</strong> dans Albums devient un album, avec ses sous-dossiers ; déposé dans Photos ou Vidéos, ses fichiers y partent, triés par type, et son nom devient leur dossier d'origine (filtre).</li>
+        <li><strong>Pas de doublon avec le téléphone</strong> : l'empreinte de l'original (SBF1) est la même partout. Une photo déjà sauvegardée depuis le téléphone est reconnue et n'est pas renvoyée.</li>
+        <li><strong>Aperçus</strong> : pour une photo, une image de 480 px faite sur l'ordinateur et chiffrée, comme sur le téléphone. Pour une vidéo ou un PDF déposés depuis le PC, une icône dans cette version.</li>
+        <li><strong>Télécharger</strong> : l'inscrit choisit un dossier du PC ; un dossier du coffre y est recréé avec ses sous-dossiers. Le déchiffrement se fait sur l'ordinateur.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">05</span></div>
+    <div class="col">
+      <h2>Regarder et ranger</h2>
+      <ul class="plain">
+        <li><strong>Vidéos et audios</strong> : lus par <code>media_kit</code> (libmpv), qui fonctionne sous Windows et Linux ; <code>video_player</code>, utilisé sur le téléphone, ne fonctionne pas sur ordinateur. Sous Windows, la bibliothèque est fournie avec l'application ; sous Linux, le paquet <code>.deb</code> la demande au système.</li>
+        <li><strong>Commentaires</strong> : lire, écrire et enregistrer un audio au micro de l'ordinateur ; un seul commentaire par photo, comme sur le téléphone.</li>
+        <li><strong>Ranger</strong> : toutes les actions du téléphone, avec les mêmes routes du serveur : dossiers et albums, déplacer, « ici ou partout », corbeille et restauration, libérer de l'espace.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">06</span></div>
+    <div class="col">
+      <h2>Sauvegarder un dossier du PC</h2>
+      <ol class="steps">
+        <li><div class="step"><p><strong>L'inscrit choisit un ou plusieurs dossiers</strong> du PC (Images, Documents…), et pour chacun ce qui part : photos, vidéos, audios, documents.</p></div></li>
+        <li><div class="step"><p><strong>Un premier passage</strong> compare tout le dossier au coffre par les empreintes ; ce qui y est déjà ne repart pas. L'estimation et l'espace libre s'affichent avant de commencer, comme sur le téléphone.</p></div></li>
+        <li><div class="step"><p><strong>Ensuite, au fil de l'eau</strong> : un nouveau fichier ou un fichier modifié part tout seul. Sous Linux, la surveillance des sous-dossiers n'est pas fiable : un passage complet toutes les 15 minutes la complète.</p></div></li>
+        <li><div class="step"><p><strong>Un seul sens</strong> : un fichier supprimé du PC reste dans le coffre ; un fichier supprimé du coffre n'est plus sauvegardé (même règle que le téléphone, « ne plus sauvegarder »).</p></div></li>
+        <li><div class="step"><p><strong>Rangement</strong> : chaque fichier va dans le dossier de son type (Photos, Vidéos, Audio, Documents), avec le nom du dossier du PC comme dossier d'origine. Les plus récents d'abord ; quand l'espace manque, les plus anciens attendent.</p></div></li>
+      </ol>
+      <p>Dans cette version, la sauvegarde tourne quand l'application est ouverte. Le lancement au démarrage de l'ordinateur et l'icône près de l'horloge viendront ensuite.</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">07</span></div>
+    <div class="col">
+      <h2>Le code</h2>
+      <p>Tout dans le dépôt de l'app mobile (<code>Alanya2026/Alanya</code>), pour que les deux applications avancent ensemble :</p>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Dossier</th><th>Contenu</th></tr></thead>
+          <tbody>
+            <tr><td><code>packages/alanya_safebox</code></td><td>Le paquet commun : chiffrement SBX1, modèles, règles de format, estimations, empreintes, API du coffre, gestionnaires d'envois et de téléchargements, cache des aperçus. Sans écran.</td></tr>
+            <tr><td><code>lib/</code> (app mobile)</td><td>Inchangée pour l'inscrit : elle importe le paquet au lieu de ses propres fichiers. Restent chez elle ce qui touche au téléphone : discussions, compression Android, galerie, tâche de fond.</td></tr>
+            <tr><td><code>desktop/</code></td><td>L'application de bureau, Windows et Linux : connexion, écrans, sauvegarde du PC, lecteur vidéo.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="plain">
+        <li><strong>L'API du coffre ne dépend plus du client de l'app mobile</strong> : le paquet définit une petite interface HTTP (requêtes avec le jeton, renouvellement du jeton) que chaque application fournit.</li>
+        <li><strong>La sortie du paquet ne change rien pour l'app mobile</strong> : ses 160 tests du coffre doivent passer avant et après, à l'identique.</li>
+        <li><strong>Stockage local</strong> : jetons dans le coffre du système (<code>flutter_secure_storage</code>, Windows et Linux), réglages dans <code>shared_preferences</code>, fichiers dans le dossier de l'application.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">08</span></div>
+    <div class="col">
+      <h2>Sécurité</h2>
+      <ul class="plain">
+        <li>Mêmes règles que le téléphone : le serveur remet la clé d'un fichier à son propriétaire connecté ; MEGA ne voit que des blocs chiffrés.</li>
+        <li>Les fichiers ne sont déchiffrés sur l'ordinateur qu'à la demande (visionneuse, téléchargement). Les aperçus restent chiffrés sur le disque.</li>
+        <li>« Se déconnecter » efface les jetons et tout ce que l'application a gardé sur l'ordinateur. Une déconnexion depuis le téléphone fait de même au prochain appel.</li>
+        <li>Un ordinateur partagé est le risque principal : l'écran de connexion le rappelle, et « Appareils connectés » sur le téléphone permet de couper l'accès à distance.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">09</span></div>
+    <div class="col">
+      <h2>Distribution</h2>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Plateforme</th><th>Construction</th><th>Livraison</th><th>Coût</th></tr></thead>
+          <tbody>
+            <tr><td>Linux</td><td>Sur le poste de développement</td><td>Paquet <code>.deb</code> et AppImage</td><td>Gratuit</td></tr>
+            <tr><td>Windows</td><td>GitHub Actions, machine Windows ; Flutter ne construit pas pour Windows depuis Linux</td><td>Installateur <code>.exe</code> (Inno Setup)</td><td>Gratuit dans la limite des minutes offertes au dépôt privé ; l'installateur non signé déclenche un avertissement de Windows (SmartScreen). Le signer coûte un certificat payant : pas prévu.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Mises à jour de la version 1 : une page de téléchargement, et l'application signale une nouvelle version au démarrage.</p>
+      <div class="note-box">
+        <div class="lbl">Avant de commencer, sur le poste Linux</div>
+        <p>Flutter ne peut pas encore construire pour Linux sur ce poste (<code>flutter doctor</code> : outils manquants). À installer une fois : <code>sudo apt install pkg-config clang cmake ninja-build libgtk-3-dev libsecret-1-dev libmpv-dev</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">10</span></div>
+    <div class="col">
+      <h2>Les lots</h2>
+      <ol class="steps">
+        <li><div class="step"><p><strong>Lot D1 · le paquet commun</strong> <span class="chip todo">à faire</span></p><p class="sub">Sortir le code du coffre de l'app mobile dans <code>packages/alanya_safebox</code>, avec l'interface HTTP. Aucun changement visible ; tous les tests de l'app mobile passent.</p></div></li>
+        <li><div class="step"><p><strong>Lot D2 · l'application et la connexion</strong> <span class="chip todo">à faire</span></p><p class="sub">Projet <code>desktop/</code>, fenêtre et barre latérale, connexion par QR code, accueil et espace, parcours des dossiers en lecture. Sous Linux d'abord.</p></div></li>
+        <li><div class="step"><p><strong>Lot D3 · regarder et télécharger</strong> <span class="chip todo">à faire</span></p><p class="sub">Visionneuse (photos, vidéos par media_kit), commentaires, téléchargement de fichiers et de dossiers vers le PC, Partager en lecture.</p></div></li>
+        <li><div class="step"><p><strong>Lot D4 · ajouter</strong> <span class="chip todo">à faire</span></p><p class="sub">Glisser-déposer, aperçus des photos, envois et transferts, empreintes pour ne rien renvoyer.</p></div></li>
+        <li><div class="step"><p><strong>Lot D5 · ranger</strong> <span class="chip todo">à faire</span></p><p class="sub">Dossiers et albums, sélection multiple, clic droit et raccourcis, corbeille, libérer de l'espace.</p></div></li>
+        <li><div class="step"><p><strong>Lot D6 · sauvegarder un dossier du PC</strong> <span class="chip todo">à faire</span></p><p class="sub">Choix des dossiers, premier passage avec estimation, surveillance et passages réguliers, réglages.</p></div></li>
+        <li><div class="step"><p><strong>Lot D7 · Windows et mise en service</strong> <span class="chip todo">à faire</span></p><p class="sub">Construction Windows sur GitHub Actions, installateur, paquets Linux, page de téléchargement, essais sur Windows et Linux.</p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="gutter"><span class="num">11</span></div>
+    <div class="col">
+      <h2>Décisions</h2>
+      <div class="tbl-wrap">
+        <table class="tbl-prose">
+          <thead><tr><th>Sujet</th><th>Décision</th></tr></thead>
+          <tbody>
+            <tr><td>Plateformes (10/11)</td><td>Windows et Linux.</td></tr>
+            <tr><td>Connexion (10/11)</td><td>QR code scanné avec le téléphone, seulement.</td></tr>
+            <tr><td>Version 1 (10/11)</td><td>Parcourir et visionner, ajouter et télécharger, ranger, sauvegarder un dossier du PC.</td></tr>
+            <tr><td>Code (10/11)</td><td>Un paquet commun aux deux applications.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>À confirmer</h3>
+      <div class="open">
+        <div>
+          <h3>Nom de l'application</h3>
+          <p>Le nom affiché dans le menu Démarrer et l'installateur.</p>
+          <p class="reco">Proposé : « Alanya Coffre-fort » (« Alanya SafeBox » en anglais).</p>
+        </div>
+        <div>
+          <h3>Sauvegarde du PC application fermée</h3>
+          <p>Lancement au démarrage de l'ordinateur et icône près de l'horloge, pour sauvegarder sans garder la fenêtre ouverte.</p>
+          <p class="reco">Proposé : après la version 1.</p>
+        </div>
+        <div>
+          <h3>Compression sur l'ordinateur</h3>
+          <p>HD et Compressé pour les photos (faisable en Dart) et les vidéos (demande ffmpeg, plus lourd).</p>
+          <p class="reco">Proposé : les photos d'abord, après la version 1.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
