@@ -23,6 +23,17 @@ require.cache[servicePath] = {
   children: [],
 };
 
+const keyServicePath = require.resolve('../services/e2eeKeyService');
+let publies = new Set();
+require.cache[keyServicePath] = {
+  id: keyServicePath,
+  filename: keyServicePath,
+  loaded: true,
+  exports: { appareilPublie: async (appareilId) => publies.has(appareilId) },
+  paths: [],
+  children: [],
+};
+
 const requireE2ee = require('./requireE2ee');
 
 function fauxRes() {
@@ -32,10 +43,10 @@ function fauxRes() {
   return res;
 }
 
-async function passe(alanyaID) {
+async function passe(alanyaID, appareilId = null) {
   const res = fauxRes();
   let suivant = false;
-  await requireE2ee({ user: { alanyaID } }, res, () => { suivant = true; });
+  await requireE2ee({ user: { alanyaID, appareilId } }, res, () => { suivant = true; });
   return { res, suivant };
 }
 
@@ -55,6 +66,13 @@ async function main() {
 
   // La garde interroge bien le compte de la requête, pas un autre.
   assert.deepStrictEqual(appels, [7, 8]);
+
+  // Un appareil qui a déjà publié passe même hors cohorte : ses conversations
+  // déjà chiffrées doivent continuer de fonctionner si l'on referme le cran.
+  publies = new Set([80]);
+  assert.strictEqual((await passe(8, 80)).suivant, true, 'appareil déjà inscrit');
+  // Témoin : un autre appareil du même compte, jamais inscrit, reste dehors.
+  assert.strictEqual((await passe(8, 81)).suivant, false);
 
   console.log('requireE2ee.test.js OK');
 }

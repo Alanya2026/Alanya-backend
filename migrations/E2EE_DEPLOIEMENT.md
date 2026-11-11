@@ -1,4 +1,4 @@
-# Chiffrement de bout en bout — déploiement des migrations 091 à 094
+# Chiffrement de bout en bout — déploiement des migrations 091 à 094, puis 104
 
 `main` se déploie à chaque push. Ces migrations s'appliquent **à la main, avant
 de pousser** le code qui les suit sur `main`. Elles sont réexécutables.
@@ -52,7 +52,14 @@ mysql -u USER -p DATABASE < migrations/091_e2ee_cles.sql
 mysql -u USER -p DATABASE < migrations/092_e2ee_enveloppes.sql
 mysql -u USER -p DATABASE < migrations/093_report_extrait.sql
 mysql -u USER -p DATABASE < migrations/094_e2ee_settings.sql
+# Étape 2 (texte chiffré) — après les migrations 095 à 103 déjà en place :
+mysql -u USER -p DATABASE < migrations/104_e2ee_conversation.sql
 ```
+
+104 ajoute `conversation.e2ee_since` (même conduite que 092 si
+`ALGORITHM=INSTANT` est refusé) et élargit `message_envelope.wrapped_key` à
+512 octets : un message Signal d'amorçage en fait 184, l'ancienne limite de
+128 aurait refusé le premier message de chaque conversation.
 
 ### Si 092 refuse avec `ER_ALTER_OPERATION_NOT_SUPPORTED`
 
@@ -76,7 +83,9 @@ verrouillerait. Le refus ne touche rien. Dans ce cas :
 | Routes `/api/e2ee/*` | 091, 094 | 094 absente ⇒ `E2EE_INACTIF` (fermé) |
 | **Création d'un signalement** | **092 et 093** | **échec** (`enc_version`, `target_excerpt`) |
 | **Liste des signalements (admin)** | **093** | **échec** (`r.target_excerpt`) |
-| Purge `e2ee_envelope` (manuelle, admin) | 091, 092 | échec isolé, journalisé ; les autres purges continuent |
+| Purge `e2ee_envelope` (nocturne) | 091, 092 | échec isolé, journalisé ; les autres purges continuent |
+| Envoi, modification, transfert : garde « fil chiffré » | 104 | 104 absente ⇒ aucun fil n'est chiffré, tout passe comme avant |
+| Activation d'une conversation (`GET /api/e2ee/devices`) | 104 | 104 absente ⇒ rien ne s'active |
 
 Les deux lignes en gras sont la raison de la règle : **091 à 094 d'abord, push
 ensuite.**

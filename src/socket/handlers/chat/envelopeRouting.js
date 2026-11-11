@@ -89,6 +89,7 @@ function emetEnveloppes(io, { payload, chiffre, plan }) {
   const body = {
     ct: chiffre.body.toString('base64'),
     nonce: chiffre.nonce.toString('base64'),
+    senderAppareilId: chiffre.emetteurAppareilId ?? null,
   };
   const parAppareil = new Map(
     chiffre.enveloppes.map((e) => [Number(e.appareilId), e]),

@@ -265,8 +265,26 @@ async function retireClesAppareils(appareilIds) {
   }
 }
 
+/**
+ * Cet appareil a-t-il un bundle publié ? Ne lève jamais : table absente ou
+ * base indisponible valent « non ».
+ */
+async function appareilPublie(appareilId) {
+  if (appareilId == null) return false;
+  try {
+    const [rows] = await pool.execute(
+      'SELECT 1 FROM e2ee_device_keys WHERE appareil_id = ? LIMIT 1',
+      [appareilId],
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   SEUIL_REGARNISSAGE,
+  appareilPublie,
   etatDuStock,
   retireClesAppareils,
   insereOneTimePreKeys,

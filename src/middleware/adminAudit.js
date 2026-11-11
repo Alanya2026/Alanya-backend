@@ -30,6 +30,11 @@ const SKIP = new Map([
   // POST par commodité (le ciblage voyage dans le corps), mais ne calcule
   // qu'une taille d'audience et n'écrit rien.
   ['POST /broadcasts/estimate', 'lecture déguisée en POST'],
+  // Recherche d'une empreinte de document sensible : le contrôleur écrit
+  // lui-même sa ligne (`documents.trace`), AVANT de répondre et même pour une
+  // empreinte inconnue (404) — ce que ce journal, qui ne note que les succès
+  // après coup, ne sait pas faire. L'y laisser doublerait chaque recherche.
+  ['POST /documents-sensibles/empreintes/:code/verification', 'journalisée par son contrôleur'],
 ]);
 
 /**

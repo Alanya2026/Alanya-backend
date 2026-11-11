@@ -75,6 +75,7 @@ const test = (nom, fn) => { tests.push([nom, fn]); };
   test("éditer un texte dans la fenêtre reste autorisé (régression des types 0-9)", async () => {
     const script = [
       () => [[ligne()]],
+      () => [[{ e2ee_since: null }]], // le fil n'est pas chiffré
       () => ({}), // UPDATE → ResultSetHeader
       () => [[ligne({ content: 'nouveau texte', isEdited: 1 })]], // SELECT du message maj
     ];
@@ -82,6 +83,17 @@ const test = (nom, fn) => { tests.push([nom, fn]); };
     assert.strictEqual(reponse.statut, 200, JSON.stringify(reponse.erreur || ''));
     assert.strictEqual(reponse.corps.content, 'nouveau texte');
     assert.strictEqual(requetes.filter(([sql]) => /UPDATE message/i.test(sql)).length, 1);
+  });
+
+  test('éditer un ancien texte en clair d\'un fil passé en chiffré est refusé', async () => {
+    // Témoin : le test précédent, même message, fil non chiffré, passe.
+    const { reponse, requetes } = await lance(
+      [() => [[ligne()]], () => [[{ e2ee_since: new Date() }]]],
+      { id: '7' },
+    );
+    assert.strictEqual(reponse.statut, 409);
+    assert.strictEqual(reponse.corps.code, 'CONVERSATION_CHIFFREE');
+    assert.ok(!requetes.some(([sql]) => /UPDATE message/i.test(sql)), 'aucune écriture');
   });
 
   test("l'édition d'un texte chiffré garde son refus E2EE prioritaire", async () => {

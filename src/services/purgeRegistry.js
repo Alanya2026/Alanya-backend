@@ -279,10 +279,10 @@ const DESCRIPTORS = {
       key: 'remisesDays',
       label: 'Enveloppes remises',
       unit: 'jours',
-      // Pas zéro : un appareil peut réinstaller juste après avoir reçu, avant
-      // d'avoir sauvegardé. Ces quelques jours sont la seule fenêtre où il
-      // peut encore rattraper un message par la synchronisation. Au-delà,
-      // c'est la sauvegarde Drive qui porte l'historique, pas le serveur.
+      // « Remise » veut dire : l'appareil a accusé réception APRÈS avoir rangé
+      // le message (`e2ee:ack`). L'enveloppe ne sert alors plus à rien — elle
+      // est scellée pour sa session, qu'une réinstallation ne retrouverait
+      // pas. Quelques jours de marge pour le diagnostic, pas davantage.
       min: 1,
       max: 90,
       default: () => 7,
@@ -290,12 +290,14 @@ const DESCRIPTORS = {
       key: 'attenteDays',
       label: 'Enveloppes jamais remises',
       unit: 'jours',
-      // Un appareil éteint depuis un mois n'a plus besoin de ce message en
-      // temps réel. Aligné sur la rétention des médias (30 jours) : garder
-      // l'enveloppe plus longtemps que la pièce jointe n'aurait pas de sens.
+      // Jamais relevée, elle est encore LISIBLE : c'est la seule copie de la
+      // clé de ce message pour cet appareil. Un téléphone éteint deux mois
+      // doit pouvoir la relever en revenant ; la supprimer serait une perte
+      // silencieuse et définitive (docs/e2ee, chapitre 6). Le corps, lui, ne
+      // pèse pas plus que le `content` d'un message en clair.
       min: 7,
       max: 365,
-      default: () => 30,
+      default: () => 90,
     }],
     async stats(opts) {
       const [[remises]] = await pool.execute(

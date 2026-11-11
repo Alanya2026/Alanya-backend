@@ -1,6 +1,9 @@
 const pool = require('../config/db');
 const { fail } = require('../utils/apiError');
 const { peutPublier } = require('../services/e2eeSettingsService');
+const {
+  refusEnvoi, refusModification, refusTransfert, filChiffre, erreurRefus,
+} = require('../utils/e2eePolicy');
 const { deleteMediaFile } = require('../utils/mediaFile');
 const { notifyNewMessage } = require('../services/notificationService');
 const { evaluateDirectMessageSend } = require('../utils/blockUtils');
@@ -330,6 +333,19 @@ const _persistMessage = async (conn, conversationID, senderID, fields) => {
 
   const silentDrop = blockEval.isDirect && blockEval.action === 'silent';
 
+  // Fil chiffré : pas de texte en clair ; fil en clair : pas de corps
+  // chiffré. Après l'appartenance — un non-membre n'apprend pas l'état du
+  // fil —, et AVANT toute écriture. Même règle que `message:send`, et que le
+  // transfert, qui passe par ici. Voir `utils/e2eePolicy`.
+  const refusE2ee = refusEnvoi({
+    filChiffre: await filChiffre(conversationID, conn || pool),
+    chiffre,
+    type,
+    content,
+    replyToContent,
+  });
+  if (refusE2ee) throw erreurRefus(refusE2ee);
+
   // Sticker : même fonction que `message:send` (socket). Le serveur relit le
   // `sid` en base ; `content`, `mediaUrl` et `mediaName` du client sont
   // ignorés. Une `StickerMessageError` porte `status`, `code` et `feature` :
@@ -620,6 +636,16 @@ const updateMessage = async (req, res) => {
         error: 'La modification d\'un sticker n\'est pas prise en charge',
         code: 'STICKER_EDIT_FORBIDDEN',
       });
+    }
+
+    // Ni sur un ancien message en clair d'un fil passé en chiffré : le texte
+    // modifié entrerait lisible dans un fil annoncé chiffré.
+    const refusE2ee = refusModification({
+      filChiffre: await filChiffre(existing[0].conversationID, pool),
+    });
+    if (refusE2ee) {
+      const err = erreurRefus(refusE2ee);
+      return res.status(err.status).json({ error: err.message, code: err.code });
     }
 
     const sentAt = new Date(existing[0].sendAt);
@@ -1280,6 +1306,15 @@ const batchForwardMessages = async (req, res) => {
     for (const m of sources) {
       if (m.isDeleted) {
         return res.status(400).json({ error: 'Message supprimé non transférable', code: 'INVALID_MESSAGE' });
+      }
+      // Le serveur recopie la ligne, et la ligne d'un message chiffré n'a
+      // pas de contenu : le destinataire recevrait une bulle vide. C'est
+      // l'appareil qui transfère, en renvoyant (docs/e2ee, chapitre 29). La
+      // cible chiffrée, elle, est gardée par `_persistMessage`.
+      const refusSource = refusTransfert({ sourceChiffree: Number(m.enc_version) === 1 });
+      if (refusSource) {
+        const err = erreurRefus(refusSource);
+        return res.status(err.status).json({ error: err.message, code: err.code });
       }
       if (m.isViewOnce) {
         return res.status(400).json({ error: 'Média à vue unique non transférable', code: 'INVALID_MEDIA' });

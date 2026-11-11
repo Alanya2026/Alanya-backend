@@ -13,6 +13,7 @@ const {
 } = require('../../services/voicemailScheduleService');
 const { maxParticipants, maxInvitees } = require('../../constants/participantLimits');
 const { isBlockedEitherWay } = require('../../utils/blockUtils');
+const { canCallUser } = require('../../services/privacyPrefsService');
 const { isOfficialAccount } = require('../../utils/officialAccountGuard');
 const { checkOutgoing, OUTGOING_DENIED } = require('../../services/billing/outgoingGate');
 const { getClientIp, parseCallMode } = require('../../utils/clientIp');
@@ -1035,6 +1036,17 @@ const callUser = (io, socket, userSockets) => {
       }
 
       if (await isBlockedEitherWay(callerID, targetID)) {
+        socket.emit('call_failed', { reason: 'Appel impossible', code: 'CALL_BLOCKED' });
+        return;
+      }
+
+      // Filtre d'appels de la cible : l'appelant n'est pas dans ses contacts.
+      // Même refus qu'un blocage : les applications déjà installées affichent
+      // « Appel impossible », et l'appelant ne peut pas distinguer les deux.
+      // Avant le répondeur : l'appel ne passe pas, il n'y a pas de message à
+      // laisser, et rien n'est inscrit dans le journal de la cible.
+      if (!(await canCallUser(callerID, targetID))) {
+        console.log(`[Socket call_user] ⛔ filtre d'appels: ${callerID} → ${targetID}`);
         socket.emit('call_failed', { reason: 'Appel impossible', code: 'CALL_BLOCKED' });
         return;
       }
@@ -2126,6 +2138,14 @@ const addParticipant = (io, socket, userSockets) => {
         return reject('TARGET_BLOCKED');
       }
 
+      // Filtre d'appels de l'invité : compte celui qui invite, pas l'autre
+      // présent. Être en contact avec le second n'y change rien : c'est le
+      // premier qui fait sonner.
+      if (!(await canCallUser(requesterID, inviteeID))) {
+        console.log(`[Socket call_add] ⛔ filtre d'appels: ${requesterID} → ${inviteeID}`);
+        return reject('TARGET_BLOCKED');
+      }
+
       // Répondeur de l'invité : au même endroit et pour la même raison que le
       // blocage ci-dessus — AVANT que quoi que ce soit ne soit posé.
       //
@@ -2582,6 +2602,13 @@ const createGroupCall = (io, socket, userSockets) => {
           console.log(
             `[create_group_call] invité ${targetID} occupé — non sonné`,
           );
+          continue;
+        }
+        // Filtre d'appels : sans ce contrôle, il suffirait à un inconnu de lancer
+        // un « groupe » avec sa cible pour seul invité. Les autres invités sonnent
+        // normalement ; l'organisateur, lui, n'apprend rien, comme pour un occupé.
+        if (!(await canCallUser(callerID, targetID))) {
+          console.log(`[create_group_call] invité ${targetID} : filtre d'appels — non sonné`);
           continue;
         }
         await callDeviceOwnership.ring(String(roomId), targetID);
