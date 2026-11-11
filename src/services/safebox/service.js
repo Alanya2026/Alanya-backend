@@ -1527,6 +1527,9 @@ function createSafeboxService({
    *   uploading un envoi est en cours (autre appareil, réinstallation) ;
    *   skip      supprimé du coffre par l'inscrit : ne plus sauvegarder ;
    *   new       à envoyer.
+   * Avec saved et elsewhere, `original` : une des copies prêtes est en
+   * qualité Original (11/11/2026) — l'application ne retire du téléphone
+   * que ce que le coffre garde en Original.
    */
   async function backupCheck(alanyaID, body = {}) {
     ready();
@@ -1539,7 +1542,7 @@ function createSafeboxService({
     let fichiers;
     try {
       [fichiers] = await db.query(
-        `SELECT f.id, f.family, fo.root, b.id AS blob_id, b.status, b.source_fp
+        `SELECT f.id, f.family, f.compressed, fo.root, b.id AS blob_id, b.status, b.source_fp
            FROM safebox_file f
            JOIN safebox_blob b ON b.id = f.blob_id
            JOIN safebox_folder fo ON fo.id = f.folder_id
@@ -1557,6 +1560,10 @@ function createSafeboxService({
     );
     for (const x of sautes) results[parEmpreinte.get(x.source_fp)] = { state: 'skip' };
     const ailleurs = new Map();
+    const originaux = new Set();
+    for (const f of fichiers) {
+      if (f.status === 'ready' && Number(f.compressed) === 0) originaux.add(parEmpreinte.get(f.source_fp));
+    }
     for (const f of fichiers) {
       const fp = parEmpreinte.get(f.source_fp);
       const r = results[fp];
@@ -1587,6 +1594,9 @@ function createSafeboxService({
         });
         if (fileId) results[fp] = { state: 'saved', fileId: Number(fileId), linked: true };
       }
+    }
+    for (const [fp, r] of Object.entries(results)) {
+      if (r.state === 'saved' || r.state === 'elsewhere') r.original = originaux.has(fp);
     }
     return { results };
   }

@@ -861,9 +861,9 @@ test('sauvegarde automatique : doublons, ajout sans copie à Photos, « ne plus 
   const Q = await compte('autre-telephone');
   const racines = Object.fromEntries((await svc.overview(P)).roots.map((r) => [r.root, r.id]));
   const fp = (n) => crypto.createHash('sha256').update(`original-${n}`).digest('hex');
-  const deposerAvec = async (qui, folderId, name, empreinte) => {
+  const deposerAvec = async (qui, folderId, name, empreinte, plus = {}) => {
     const r = await svc.reserveUpload(qui, {
-      folderId, name, size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: empreinte,
+      folderId, name, size: 20, plainSize: 20, cipherFormat: 'SBX1', sourceFp: empreinte, ...plus,
     });
     deposer(r);
     return svc.completeUpload(qui, r.fileId, { key: cle.toString('base64') });
@@ -880,6 +880,14 @@ test('sauvegarde automatique : doublons, ajout sans copie à Photos, « ne plus 
   const avant = await svc.backupCheck(P, { fps: [fp(1), fp(2), fp(3), fp(4)] });
   assert.deepStrictEqual(etats(avant), { [fp(1)]: 'saved', [fp(2)]: 'elsewhere', [fp(3)]: 'uploading', [fp(4)]: 'new' });
   assert.strictEqual(avant.results[fp(1)].fileId, sauvee.id);
+  // 11/11/2026 : la qualité, pour ne retirer du téléphone que ce que le coffre garde en Original.
+  assert.strictEqual(avant.results[fp(1)].original, true);
+  assert.strictEqual(avant.results[fp(2)].original, true);
+  assert.strictEqual('original' in avant.results[fp(3)], false);
+  assert.strictEqual('original' in avant.results[fp(4)], false);
+  await deposerAvec(P, racines.photos, 'EnHd.jpg', fp(6), { compressed: true, quality: 'hd', originalSize: 40 });
+  const hd = (await svc.backupCheck(P, { fps: [fp(6)] })).results[fp(6)];
+  assert.deepStrictEqual([hd.state, hd.original], ['saved', false]);
 
   // L'empreinte est liée au compte : le même original n'est pas « déjà là » chez un autre.
   assert.deepStrictEqual(etats(await svc.backupCheck(Q, { fps: [fp(1)] })), { [fp(1)]: 'new' });
