@@ -62,3 +62,6 @@ data/trip-purge-log.json
 *.out
 *.synctex.gz
 *.toc
+
+# Fichiers de l'application de bureau du coffre (servis par /coffre, déposés sur le VPS)
+downloads/

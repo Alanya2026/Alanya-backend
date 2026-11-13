@@ -21,6 +21,7 @@
         "test:filtre-appels": "NODE_ENV=test node src/socket/handlers/callFilter.test.js",
         "test:mail": "NODE_ENV=test node src/services/mailService.test.js",
         "test:legal": "NODE_ENV=test node src/controllers/legalController.test.js",
+        "test:coffre-bureau": "NODE_ENV=test node src/controllers/desktopDownloadController.test.js",
         "test:qr": "NODE_ENV=test node src/socket/state/qrLoginSessions.test.js && NODE_ENV=test node src/socket/state/qrContactTokens.test.js && NODE_ENV=test node src/controllers/qrAuthAccessLog.test.js",
         "test:appareils": "NODE_ENV=test node src/services/securitySettingsService.test.js && NODE_ENV=test node src/services/deviceSessionService.test.js && NODE_ENV=test node src/controllers/authDeviceBinding.test.js",
         "test:comptes": "NODE_ENV=test node src/utils/accountInputRules.test.js && NODE_ENV=test node src/utils/displayNameGuard.test.js",

@@ -61,6 +61,7 @@ const safeboxRoutes      = require('./src/routes/safebox');
 const documentsSensiblesRoutes = require('./src/routes/documentsSensibles');
 const qrLandingRoutes    = require('./src/routes/qrLanding');
 const legalRoutes        = require('./src/routes/legal');
+const desktopDownloadRoutes = require('./src/routes/desktopDownload');
 const healthRoutes       = require('./src/routes/health');
 
 // ── Socket handlers ───────────────────────────────────────────────────
@@ -231,6 +232,10 @@ app.use('/notify',            notifyRoutes);
 // exigées par Google pour publier l'écran OAuth Drive, et déjà liées depuis
 // l'application. Avant le volet QR : `GET /` doit décrire Alanya, pas 404.
 app.use('/', legalRoutes);
+
+// Application de bureau du coffre-fort : page de téléchargement, fichiers et
+// version.json (alanya237.com/coffre). Fichiers hors git, sur le VPS.
+app.use('/', desktopDownloadRoutes);
 
 // Routes publiques du volet QR (page d'accueil d'un code, fichiers
 // d'association des liens universels) — à la racine du domaine, hors /api :

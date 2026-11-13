@@ -355,4 +355,7 @@ module.exports = {
   // contrat avec Google, une régression silencieuse y serait grave.
   langueDe,
   PAGES,
+  // Le gabarit commun, pour les autres pages publiques (/coffre).
+  renderPage: _page,
+  escapeHtml: _esc,
 };
