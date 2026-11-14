@@ -35,4 +35,15 @@ assert.match(combo.whereSql, /u\.account_type = \?/);
 // Ordre des paramètres : ordre des clauses (account_type, type_compte, idPays).
 assert.deepStrictEqual(combo.params, [0, 1, '4']);
 
+// La recherche couvre aussi l'alanyaID (sélecteur de comptes E2EE).
+const chercheId = buildUsersWhere({ search: '12' });
+assert.match(chercheId.whereSql, /CAST\(u\.alanyaID AS CHAR\) LIKE \?/);
+assert.deepStrictEqual(chercheId.params, ['%12%', '%12%', '%12%', '%12%']);
+
+// Liste explicite d'IDs : doublons et valeurs invalides écartés.
+const ids = buildUsersWhere({ ids: '3, 1,3,abc,-2' });
+assert.match(ids.whereSql, /u\.alanyaID IN \(\?,\?\)/);
+assert.deepStrictEqual(ids.params, [3, 1]);
+assert.deepStrictEqual(buildUsersWhere({ ids: '' }).params, []);
+
 console.log('usersQuery.test.js OK');

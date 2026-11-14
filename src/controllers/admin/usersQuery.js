@@ -31,9 +31,29 @@ function buildUsersWhere(query) {
   const params = [];
 
   if (search) {
-    where.push('(u.nom LIKE ? OR u.pseudo LIKE ? OR u.alanyaPhone LIKE ?)');
+    // L'alanyaID cherche comme le reste : le champ est numérique, mais un
+    // `LIKE` sur sa forme texte évite à l'appelant de savoir s'il tient un ID
+    // ou un nom. Les deux se cherchent au même endroit.
+    where.push('(u.nom LIKE ? OR u.pseudo LIKE ? OR u.alanyaPhone LIKE ? OR CAST(u.alanyaID AS CHAR) LIKE ?)');
     const like = `%${search}%`;
-    params.push(like, like, like);
+    params.push(like, like, like, like);
+  }
+
+  // Liste explicite d'alanyaID : résout les comptes d'une sélection (cohorte
+  // E2EE) en une requête, sans boucler sur GET /users/:id.
+  if (query.ids != null && query.ids !== '') {
+    const ids = [
+      ...new Set(
+        String(query.ids)
+          .split(',')
+          .map((v) => Number(v.trim()))
+          .filter((n) => Number.isInteger(n) && n > 0),
+      ),
+    ].slice(0, 500);
+    if (ids.length) {
+      where.push(`u.alanyaID IN (${ids.map(() => '?').join(',')})`);
+      params.push(...ids);
+    }
   }
   if (status === 'online') { where.push('up.is_online = ?'); params.push(1); }
   if (status === 'banned') { where.push('u.exclus = ?'); params.push(1); }
