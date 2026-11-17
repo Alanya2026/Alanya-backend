@@ -26,8 +26,11 @@ async function _endCallCascade({ userID, callKey }, reason) {
   // callStateWorkers.js — pas de cycle, mais différer évite tout ordre de
   // chargement fragile au démarrage du module.
   const { endActiveCallForUser } = require('../socket/handlers/calls');
-  await endActiveCallForUser(_io, _userSockets, userID, reason);
-  if (callKey) await callDeviceOwnership.release(callKey);
+  const solde = await endActiveCallForUser(_io, _userSockets, userID, reason);
+  // Appel épargné (appareil revenu, reprise confirmée) : il est vivant, sa
+  // propriété d'appareil doit le rester — sans elle, la reprise suivante
+  // n'aurait plus d'appareil à qui s'adresser.
+  if (solde && callKey) await callDeviceOwnership.release(callKey);
 }
 
 function registerCallStateJobHandlers() {

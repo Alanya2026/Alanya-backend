@@ -23,6 +23,7 @@ const callState = require('../state/callState');
 const callSessions = require('../state/callSessions');
 const groupRooms = require('../state/groupRooms');
 const callDeviceOwnership = require('../state/callDeviceOwnership');
+const callIntents = require('../state/callIntents');
 const { runGroupLeaveCascade } = require('../../services/groupRoomWorkers');
 const pendingIce = require('../state/pendingIce');
 const { canFallBackToLastCall } = require('../rejectFallback');
@@ -884,6 +885,13 @@ async function endActiveCallForUser(io, userSockets, userID, reason = 'disconnec
     return false;
   }
 
+  // Reprise confirmée entre-temps : le job a pu être pris par un worker avant
+  // que `call_resume_ack` ne l'annule. L'appel est vivant, on n'y touche pas.
+  if (reason === 'resume_ack_timeout' && (await callIntents.isResumeConfirmed(userID))) {
+    console.log(`[Socket] resume_ack_timeout ignoré : reprise confirmée user=${userID}`);
+    return false;
+  }
+
   // Session à trois : le départ n'emporte pas l'appel des autres.
   if (await leaveCallSession(io, userSockets, userID, reason)) {
     return true;
@@ -916,6 +924,13 @@ async function endActiveCallForUser(io, userSockets, userID, reason = 'disconnec
     emitToUser(io, peerID, 'call_ended', { callId: callIdStr });
     notifyCallEnded(peerID, userID, 'Correspondant', callID)
       .catch((err) => console.warn('[Socket endActiveCallForUser] FCM error:', err.message));
+  }
+
+  // L'intéressé aussi. Le serveur vient de clore SON appel ; s'il est en ligne
+  // (reprise non accusée, typiquement), son application restait sinon seule
+  // sur « Reconnexion… » jusqu'à son propre délai, sans son ni explication.
+  if (callIdStr) {
+    emitToUser(io, userID, 'call_ended', { callId: callIdStr, reason });
   }
 
   return true;
@@ -965,8 +980,47 @@ async function reclaimStaleBusy(io, userID) {
   return true;
 }
 
+/**
+ * L'appel existant [callId] de la paire est-il un appel de [targetID] vers
+ * [callerID] — c'est-à-dire un croisement, et pas un `call_user` rejoué par
+ * le même appelant ?
+ */
+async function estAppelEntrantPour(callId, callerID, targetID) {
+  if (callId == null) return false;
+  try {
+    const [rows] = await pool.execute(
+      'SELECT idCaller FROM callHistory WHERE IDcall = ? LIMIT 1',
+      [callId],
+    );
+    return rows.length > 0 && Number(rows[0].idCaller) === Number(targetID);
+  } catch (err) {
+    console.warn('[Socket call_user] lecture du sens de l\'appel impossible:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Appel annulé par l'appelant avant d'avoir sonné : il n'a jamais existé pour
+ * le destinataire. On efface sa ligne d'historique plutôt que d'y laisser un
+ * « sans réponse » pour une sonnerie qui n'a pas eu lieu.
+ */
+async function oublierAppelAnnule(callID, callerID, targetID) {
+  console.log(
+    `[Socket call_user] ✋ Annulé avant la sonnerie: callId=${callID} ${callerID} → ${targetID}`,
+  );
+  try {
+    await pool.execute('DELETE FROM callHistory WHERE IDcall = ? AND status = 0', [callID]);
+  } catch (err) {
+    console.warn('[Socket call_user] effacement de l\'appel annulé impossible:', err.message);
+  }
+}
+
 const callUser = (io, socket, userSockets) => {
   socket.on('call_user', async (data) => {
+    // Rendus dans le `finally` : la marque de numérotation et le verrou de
+    // paire ne doivent survivre à aucune sortie du handler.
+    let numerotation = null;
+    let verrouPaire = null;
     try {
       if (!socket.authenticated) {
         console.warn('[Socket call_user] ** Tentative non authentifiée');
@@ -1004,6 +1058,28 @@ const callUser = (io, socket, userSockets) => {
         console.warn('[Socket call_user] ** Données invalides', { targetID, offerExists: !!offer });
         socket.emit('call_failed', { reason: 'Données d\'appel invalides' });
         return;
+      }
+
+      // Annulation pendant la numérotation. Entre ici et `setRinging`, l'appel
+      // n'existe pas encore pour `callState` : un `end_call` reçu dans cette
+      // fenêtre (raccrochage dans la seconde) trouvait l'appelant « idle » et
+      // était ignoré, puis le destinataire sonnait pour un appel abandonné.
+      // `end_call` pose désormais une marque d'annulation, relue ci-dessous
+      // avant chaque étape qui ferait sonner.
+      await callIntents.markDialing(callerID, targetID);
+      numerotation = { callerID, targetID };
+      const annuleEntreTemps = () => callIntents.isCancelled(callerID, targetID);
+
+      // Appels croisés : A→B et B→A traités en parallèle passaient tous deux
+      // le contrôle de paire avant que l'un ait posé son état, et créaient deux
+      // appels — chacun des clients abandonnait alors le sien. Le verrou les
+      // sérialise : le second voit le premier ci-dessous et devient un
+      // croisement arbitré par le serveur.
+      const jetonPaire = await callIntents.lockPair(callerID, targetID);
+      if (jetonPaire) {
+        verrouPaire = { a: callerID, b: targetID, jeton: jetonPaire };
+      } else {
+        console.warn(`[Socket call_user] verrou de paire indisponible ${callerID}↔${targetID} — on continue`);
       }
 
       // Essai fini et aucun abonnement : le compte reçoit, il n'appelle pas.
@@ -1053,6 +1129,25 @@ const callUser = (io, socket, userSockets) => {
 
       // État autoritaire : cible déjà en sonnerie avec quelqu'un d'autre ou en communication.
       const existingPair = await callState.findExistingRingingPair(callerID, targetID);
+      if (existingPair && (await estAppelEntrantPour(existingPair.callId, callerID, targetID))) {
+        // Croisement : l'autre nous appelle déjà. On garde SON appel — le
+        // premier arrivé — et on n'en crée pas un second. L'appelant de ce
+        // `call_user` abandonne son sortant et décroche l'entrant
+        // (`call_glare`) ; une ancienne app qui ignore l'événement voit au
+        // moins l'appel entrant rejoué, sans appel fantôme en face.
+        console.log(
+          `[Socket call_user] 🔀 Croisement: ${callerID}→${targetID} alors que ${targetID}→${callerID} sonne (callId=${existingPair.callId})`,
+        );
+        socket.emit('call_glare', {
+          callId: existingPair.callId != null ? String(existingPair.callId) : null,
+          peerId: String(targetID),
+        });
+        const pendingForCaller = await pendingCalls.get(callerID);
+        if (pendingForCaller) {
+          emitToUser(io, callerID, 'incoming_call', pendingForCaller);
+        }
+        return;
+      }
       if (existingPair) {
         console.log(
           `[Socket call_user] 🔁 Paire déjà en sonnerie callId=${existingPair.callId ?? 'none'} caller=${callerID} target=${targetID}`,
@@ -1103,6 +1198,11 @@ const callUser = (io, socket, userSockets) => {
       // s'ouvre, donc que le téléphone ne sonne pas. C'est la promesse même de
       // la fonctionnalité, et `voicemailIntercept.test.js` la vérifie ligne à
       // ligne.
+      if (await annuleEntreTemps()) {
+        console.log(`[Socket call_user] ✋ Annulé pendant la numérotation: ${callerID} → ${targetID}`);
+        return;
+      }
+
       const verdictRepondeur = await shouldInterceptCall(targetID, callerID).catch((err) => {
         // Une planification illisible ne doit jamais faire échouer un appel :
         // le défaut penche toujours du côté « le téléphone sonne ».
@@ -1111,6 +1211,7 @@ const callUser = (io, socket, userSockets) => {
       });
 
       if (verdictRepondeur.intercept) {
+        if (await annuleEntreTemps()) return;
         console.log(`[Socket call_user] 📼 Répondeur: ${callerID} → ${targetID}`);
         await basculerVersRepondeur({
           io,
@@ -1142,6 +1243,7 @@ const callUser = (io, socket, userSockets) => {
         // quinzaine de lignes plus haut : aucune requête de plus sur un chemin
         // que chaque appel entrant traverse.
         if (isNoAnswerEnabled(verdictRepondeur.schedule)) {
+          if (await annuleEntreTemps()) return;
           console.log(`[Socket call_user] 📼 Répondeur (ligne occupée): ${callerID} → ${targetID}`);
           await basculerVersRepondeur({
             io,
@@ -1197,6 +1299,11 @@ const callUser = (io, socket, userSockets) => {
         return;
       }
 
+      if (await annuleEntreTemps()) {
+        await oublierAppelAnnule(callID, callerID, targetID);
+        return;
+      }
+
       const callKey = String(callID);
       await callDeviceOwnership.setCalling(callKey, callerID, {
         activeDeviceId: callerDeviceId,
@@ -1220,6 +1327,17 @@ const callUser = (io, socket, userSockets) => {
       // `ringing` ne soit posé et recevoir CALL_NOT_RINGING.
       await callState.setRinging(targetID, { callId: callID, peerId: callerID, isVideo: !!isVideo });
       await callState.setRinging(callerID, { callId: callID, peerId: targetID, isVideo: !!isVideo });
+
+      // Dernière relecture : un `end_call` arrivé pendant les deux `setRinging`
+      // a encore pu trouver l'appelant « idle ». Au-delà, l'état est posé et
+      // `end_call` suit son chemin normal.
+      if (await annuleEntreTemps()) {
+        await callState.clear(targetID);
+        await callState.clear(callerID);
+        await callDeviceOwnership.release(callKey);
+        await oublierAppelAnnule(callID, callerID, targetID);
+        return;
+      }
 
       // Le destinataire qui a armé le filet bascule plus tôt : 27 s au lieu de
       // 45. Le créneau a déjà été chargé quelques lignes plus haut par
@@ -1292,6 +1410,17 @@ const callUser = (io, socket, userSockets) => {
     } catch (error) {
       console.error('[Socket call_user]', error.message);
       socket.emit('call_failed', { reason: error.message });
+    } finally {
+      if (numerotation) {
+        await callIntents.clearDialing(numerotation.callerID, numerotation.targetID)
+          .catch(() => {});
+        await callIntents.clearCancelled(numerotation.callerID, numerotation.targetID)
+          .catch(() => {});
+      }
+      if (verrouPaire) {
+        await callIntents.unlockPair(verrouPaire.a, verrouPaire.b, verrouPaire.jeton)
+          .catch(() => {});
+      }
     }
   });
 };
@@ -1801,6 +1930,17 @@ const endCall = (io, socket, userSockets) => {
         !selfStillActive ||
         (selfStillActive.status !== 'ringing' && selfStillActive.status !== 'in_call')
       ) {
+        // Raccroché pendant que `call_user` tourne encore : l'appel n'a pas
+        // d'état, mais il va en avoir un et faire sonner. On le mémorise pour
+        // que `call_user` s'arrête avant (voir callIntents).
+        if (targetID && (await callIntents.isDialing(callerID, targetID))) {
+          await callIntents.markCancelled(callerID, targetID);
+          console.log(`[Socket end_call] ✋ Annulation pendant la numérotation: ${callerID} → ${targetID}`);
+          socket.currentCallID     = null;
+          socket.currentCallTarget = null;
+          repondre({ ok: true, handled: 'cancelled_while_dialing' });
+          return;
+        }
         socket.currentCallID     = null;
         socket.currentCallTarget = null;
         repondre({ ok: true, handled: 'already_idle' });
@@ -3138,8 +3278,8 @@ async function offerCallResume(io, socket, userSockets, userID) {
         console.log(
           `[Socket] resume_owner_missing timeout user=${userID} callId=${callKey ?? 'none'}`,
         );
-        await endActiveCallForUser(io, userSockets, userID, 'resume_owner_missing');
-        if (callKey) await callDeviceOwnership.release(callKey);
+        const solde = await endActiveCallForUser(io, userSockets, userID, 'resume_owner_missing');
+        if (solde && callKey) await callDeviceOwnership.release(callKey);
       } catch (e) {
         console.warn('[Socket] resume_owner_missing endActiveCallForUser failed:', e.message);
       }
@@ -3164,19 +3304,25 @@ async function offerCallResume(io, socket, userSockets, userID) {
     answer: entry.lastAnswer ?? null,
   };
   console.log(`[Socket] call_resume user=${userID} callId=${payload.callId ?? 'none'} device=${ownerDeviceId}`);
-  emitToDevice(io, userID, ownerDeviceId, 'call_resume', payload);
 
+  // Le minuteur AVANT l'émission. Dans l'ordre inverse, l'accusé du client —
+  // 300 ms sur un bon réseau — pouvait arriver avant que le job soit en base :
+  // `confirmResume` n'avait rien à annuler, le job naissait ensuite et soldait
+  // un appel parfaitement repris huit secondes plus tard. La marque de reprise
+  // confirmée couvre le reste (job déjà verrouillé par un worker).
+  await callIntents.clearResumeConfirmed(userID);
   await callState.scheduleResumeAck(userID, async () => {
     try {
       console.log(
         `[Socket] call_resume_ack timeout user=${userID} callId=${callKey ?? 'none'}`,
       );
-      await endActiveCallForUser(io, userSockets, userID, 'resume_ack_timeout');
-      if (callKey) await callDeviceOwnership.release(callKey);
+      const solde = await endActiveCallForUser(io, userSockets, userID, 'resume_ack_timeout');
+      if (solde && callKey) await callDeviceOwnership.release(callKey);
     } catch (e) {
       console.warn('[Socket] resume_ack_timeout endActiveCallForUser failed:', e.message);
     }
   });
+  emitToDevice(io, userID, ownerDeviceId, 'call_resume', payload);
   return true;
 }
 

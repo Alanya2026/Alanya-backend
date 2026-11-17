@@ -32,6 +32,7 @@
 
 const { getDataClient } = require('../../config/redisData');
 const { enqueue, cancelByDedupeKey, hasJob } = require('../../services/jobQueue');
+const callIntents = require('./callIntents');
 
 const DISCONNECT_GRACE_MS = 45 * 1000;
 // Grâce courte quand une socket tombe pendant la sonnerie (reconnexion cold-start).
@@ -531,6 +532,9 @@ async function cancelNoAnswer(userId) {
  * annule la grâce de déconnexion et le timeout d'ack.
  */
 async function confirmResume(userId) {
+  // Marque d'abord : si le job d'accusé est déjà verrouillé par un worker,
+  // l'annulation ci-dessous ne l'arrête plus — c'est la marque qui le fera.
+  await callIntents.markResumeConfirmed(userId);
   await cancelResumeAck(userId);
   await cancelResumeOwnerMissing(userId);
   await cancelDisconnectGrace(userId);

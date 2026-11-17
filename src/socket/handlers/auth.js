@@ -2,6 +2,7 @@ const jwt  = require('jsonwebtoken');
 const pool = require('../../config/db');
 const pendingCalls = require('../state/pendingCalls');
 const callState = require('../state/callState');
+const callDeviceOwnership = require('../state/callDeviceOwnership');
 const { registerUserSocket, deviceRoom, normalizeDeviceId } = require('../../utils/userSocketRegistry');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'talky-secret-key-change-in-production';
@@ -109,7 +110,18 @@ async function _registerSocket(socket, alanyaID, userSockets, io) {
   // le client n'a pas confirmé (call_resume_ack). Sinon un auth:login idle
   // ressuscite un in_call fantôme et bloque les nouveaux appels (CALLER_BUSY).
   const activeCall = await callState.getEntry(alanyaID);
-  if (activeCall?.status === 'in_call') {
+  const callKeyActif = activeCall?.callId != null ? String(activeCall.callId) : null;
+  if (
+    activeCall?.status === 'in_call' &&
+    callKeyActif &&
+    (await callDeviceOwnership.isOwnerSocket(callKeyActif, alanyaID, socket.id))
+  ) {
+    // Ré-authentification sur la socket même qui tient l'appel (jeton
+    // rafraîchi juste après le décrochage, typiquement) : rien n'a été coupé,
+    // il n'y a rien à reprendre. Proposer une reprise ici armait un minuteur
+    // d'accusé qui, perdu dans une course, raccrochait un appel sain.
+    console.log(`[Socket auth] ré-auth sur la socket de l'appel ${callKeyActif} — pas de reprise`);
+  } else if (activeCall?.status === 'in_call') {
     const { offerCallResume } = require('./calls');
     await offerCallResume(io, socket, userSockets, alanyaID);
   } else {
