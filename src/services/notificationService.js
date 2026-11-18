@@ -926,6 +926,7 @@ const notifyGroupJoinRequest = async (adminIds, { conversID, name, requester }) 
       title:          groupe,
       body:           `${qui} demande à rejoindre le groupe`,
       conversationId: String(conversID),
+      groupName:      groupe,
     });
   }
 };
@@ -938,6 +939,8 @@ const notifyGroupJoinApproved = async (userId, { conversID, name }) => {
     title:          'Demande acceptée',
     body:           `Vous faites désormais partie de « ${groupe} »`,
     conversationId: String(conversID),
+    isGroup:        '1',
+    groupName:      groupe,
   });
 };
 
