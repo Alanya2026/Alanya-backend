@@ -496,6 +496,19 @@ const { groupInviteManageLimiter } = require('../middleware/rateLimiter');
 
 /**
  * @swagger
+ * /api/conversations/{id}/invite-settings:
+ *   get:
+ *     summary: Réglages du lien d'invitation et droits de l'appelant (ne crée aucun lien)
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: "{ onlyAdminsCanShareLink, approveNewMembers, isAdmin, canShare, pendingJoinRequests }" }
+ */
+router.get('/:id/invite-settings', auth, requireParticipant, requireGroup, groupInvite.getInviteSettings);
+
+/**
+ * @swagger
  * /api/conversations/{id}/invite-link:
  *   get:
  *     summary: Lien d'invitation du groupe (créé à la première demande)

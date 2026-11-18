@@ -101,6 +101,30 @@ async function admettre({ conversID, userId, actorId, event, io }) {
 
 // ── Côté groupe ────────────────────────────────────────────────────────────
 
+/**
+ * Réglages du lien et ce que l'appelant peut en faire, SANS créer de jeton :
+ * la fiche du groupe s'en sert pour afficher (ou non) « Inviter via lien »,
+ * les deux interrupteurs et la pastille des demandes.
+ */
+const getInviteSettings = async (req, res, next) => {
+  try {
+    const { conversID, role } = req.membership;
+    const reglages = await svc.lireReglages(conversID);
+    if (!reglages) {
+      return res.status(404).json({ error: 'Conversation introuvable ou non autorisée', code: 'CONVERSATION_NOT_FOUND' });
+    }
+    const isAdmin = role >= 1;
+    res.json({
+      ...reglages,
+      isAdmin,
+      canShare: isAdmin || !reglages.onlyAdminsCanShareLink,
+      pendingJoinRequests: isAdmin ? await svc.nombreEnAttente(conversID) : 0,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const getInviteLink = async (req, res, next) => {
   try {
     const { conversID, role } = req.membership;
@@ -335,6 +359,7 @@ const cancelJoinRequest = async (req, res, next) => {
 };
 
 module.exports = {
+  getInviteSettings,
   getInviteLink,
   resetInviteLink,
   listJoinRequests,

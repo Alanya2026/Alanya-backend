@@ -145,7 +145,12 @@ const groupe = (id, opts = {}) => {
 
   // 1. Droit de voir le lien.
   membres(10).set(3, 0);
-  let r = await appeler(ctrl.getInviteLink, { user: 3, membership: adhesion(10, 3) });
+  let r = await appeler(ctrl.getInviteSettings, { user: 3, membership: adhesion(10, 3) });
+  assert.deepStrictEqual(r.body, {
+    onlyAdminsCanShareLink: true, approveNewMembers: false, isAdmin: false, canShare: false, pendingJoinRequests: 0,
+  });
+  assert.strictEqual(db.links.size, 0, 'lire les réglages ne crée aucun lien');
+  r = await appeler(ctrl.getInviteLink, { user: 3, membership: adhesion(10, 3) });
   assert.strictEqual(r.statusCode, 403, 'membre simple : lien réservé aux admins');
   assert.strictEqual(r.body.code, 'GROUP_INVITE_LINK_ADMIN_ONLY');
 
