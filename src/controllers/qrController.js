@@ -18,6 +18,8 @@ const qrContactTokens = require('../socket/state/qrContactTokens');
 //   /q/l/<id>.<secret>    session de connexion d'un nouvel appareil
 
 const _QR_PATH_RE = /^\/q\/(u|l|c)\/([^/]+)$/;
+// Lien d'invitation de groupe : `/g/<jeton>` (groupInviteService.TOKEN_RE).
+const _GROUP_PATH_RE = /^\/g\/([A-Za-z0-9_-]{16})\/?$/;
 
 /**
  * Le code permanent est réservé aux comptes business — qui n'existent pas
@@ -45,6 +47,9 @@ const _parsePayload = (raw) => {
   } catch {
     return null;
   }
+
+  const groupe = _GROUP_PATH_RE.exec(pathname);
+  if (groupe) return { type: 'group', token: groupe[1] };
 
   const match = _QR_PATH_RE.exec(pathname);
   if (!match) return null;
@@ -393,6 +398,16 @@ const resolveQr = async (req, res) => {
     }
     if (parsed.type === 'contact') {
       return await _resolveContact(req, res, alanyaID, parsed.qrPublicId);
+    }
+    if (parsed.type === 'group') {
+      // Require local : le contrôleur de groupe tire toute la pile des
+      // conversations, inutile aux autres familles de QR et à la page publique.
+      const { apercuPourJeton } = require('./groupInviteController');
+      const result = await apercuPourJeton(parsed.token, alanyaID);
+      if (!result) {
+        return res.status(404).json({ error: 'Ce lien d\'invitation ne fonctionne plus', code: 'INVITE_LINK_INVALID' });
+      }
+      return res.json({ type: 'group', token: parsed.token, ...result });
     }
     return await _resolveLogin(req, res, alanyaID, parsed);
   } catch (error) {

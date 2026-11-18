@@ -415,6 +415,8 @@ router.patch('/:id/group', auth, requireParticipant, requireGroup, updateGroupIn
  *               onlyAdminsCanEditInfo: { type: integer, enum: [0, 1] }
  *               hideHistoryForNewMembers: { type: integer, enum: [0, 1] }
  *               onlyAdminsCanAddMembers: { type: integer, enum: [0, 1] }
+ *               onlyAdminsCanShareLink: { type: integer, enum: [0, 1] }
+ *               approveNewMembers: { type: integer, enum: [0, 1] }
  *     responses:
  *       200: { description: Conversation enrichie }
  *       403: { description: GROUP_ADMIN_REQUIRED }
@@ -487,5 +489,87 @@ router.patch(
   requireGroupOwner,
   setParticipantRole,
 );
+
+// ── Lien et QR code d'invitation (migration 116) ──────────────────────────
+const groupInvite = require('../controllers/groupInviteController');
+const { groupInviteManageLimiter } = require('../middleware/rateLimiter');
+
+/**
+ * @swagger
+ * /api/conversations/{id}/invite-link:
+ *   get:
+ *     summary: Lien d'invitation du groupe (créé à la première demande)
+ *     description: >
+ *       Administrateurs, ou tout membre si `onlyAdminsCanShareLink` est coupé.
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: "{ token, url, onlyAdminsCanShareLink, approveNewMembers }" }
+ *       403: { description: GROUP_INVITE_LINK_ADMIN_ONLY }
+ */
+router.get('/:id/invite-link', auth, requireParticipant, requireGroup, groupInvite.getInviteLink);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/invite-link/reset:
+ *   post:
+ *     summary: Réinitialise le lien ; l'ancien lien et l'ancien QR cessent de fonctionner
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: "{ token, url, onlyAdminsCanShareLink, approveNewMembers }" }
+ */
+router.post('/:id/invite-link/reset', auth, groupInviteManageLimiter, requireGroupAdmin, groupInvite.resetInviteLink);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/join-requests:
+ *   get:
+ *     summary: Demandes d'adhésion en attente (administrateurs)
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: "{ requests: [{ alanyaID, nom, pseudo, avatar_url, requestedAt, isContact }] }" }
+ */
+router.get('/:id/join-requests', auth, requireGroupAdmin, groupInvite.listJoinRequests);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/join-requests/approve-all:
+ *   post:
+ *     summary: Accepte toutes les demandes en attente (jusqu'à la taille maximale)
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/:id/join-requests/approve-all', auth, requireGroupAdmin, groupInvite.approveAllJoinRequests);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/join-requests/{userId}/approve:
+ *   post:
+ *     summary: Accepte une demande (la première réponse d'un admin l'emporte)
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       404: { description: JOIN_REQUEST_NOT_FOUND }
+ *       409: { description: GROUP_FULL }
+ */
+router.post('/:id/join-requests/:userId/approve', auth, requireGroupAdmin, groupInvite.approveJoinRequest);
+
+/**
+ * @swagger
+ * /api/conversations/{id}/join-requests/{userId}/reject:
+ *   post:
+ *     summary: Refuse une demande
+ *     tags: [Conversations]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/:id/join-requests/:userId/reject', auth, requireGroupAdmin, groupInvite.rejectJoinRequest);
 
 module.exports = router;

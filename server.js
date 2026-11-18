@@ -217,6 +217,7 @@ app.use('/api/alanya-phone',  alanyaPhoneRoutes);
 app.use('/api/media',         mediaAvailRoutes);
 app.use('/api/trips', tripRoutes);
 app.use('/api/qr',            qrRoutes);
+app.use('/api/groups/invite', require('./src/routes/groupInvite'));
 app.use('/api/turn',          turnRoutes);
 app.use('/api/map',           mapRoutes);
 app.use('/api/admin',         adminRoutes);

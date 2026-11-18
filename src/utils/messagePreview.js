@@ -118,6 +118,13 @@ function systemPreviewFromContent(content) {
         : `${who} a retiré des droits d'administrateur`;
     case 'settings_changed':
       return `${who} a modifié les réglages du groupe`;
+    // Lien d'invitation (migration 116).
+    case 'member_joined_link':
+      return `${who} a rejoint via le lien d'invitation`;
+    case 'join_approved':
+      return `${who} a accepté un nouveau membre`;
+    case 'invite_link_reset':
+      return `${who} a réinitialisé le lien d'invitation`;
 
     // Capture d'écran d'une discussion à deux (POST /conversations/:id/screenshot).
     case 'screenshot':

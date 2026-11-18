@@ -48,6 +48,8 @@ const _buildApnsConfig = (data) => {
       type === 'meeting_reminder' ||
       type === 'status_view' ||
       type === 'voicemail_active' ||
+      type === 'group_join_request' ||
+      type === 'group_join_approved' ||
       // Sans cette ligne, une alerte de trajet partait en push de fond sur
       // iOS : aucun affichage, et une délivrance à la discrétion du système.
       isTripType(type));
@@ -100,6 +102,7 @@ const _buildApnsConfig = (data) => {
 const VISIBLE_TYPES = [
   'message', 'meeting_invite', 'meeting_reminder', 'status_view',
   'voicemail_active',
+  'group_join_request', 'group_join_approved',
   ...TRIP_TYPES,
 ];
 
@@ -909,6 +912,35 @@ const notifyQrContactScanned = async (ownerID, scanner, alreadyMutual) => {
   });
 };
 
+/**
+ * Lien d'invitation avec approbation : quelqu'un demande à entrer. Prévient
+ * chaque admin du groupe ; l'écran des demandes se rafraîchit, lui, par
+ * l'événement socket `group:join_requests`.
+ */
+const notifyGroupJoinRequest = async (adminIds, { conversID, name, requester }) => {
+  const qui = (requester?.nom || '').trim() || (requester?.pseudo || '').trim() || 'Quelqu\'un';
+  const groupe = (name || '').trim() || 'le groupe';
+  for (const id of adminIds) {
+    await sendToUser(id, {
+      type:           'group_join_request',
+      title:          groupe,
+      body:           `${qui} demande à rejoindre le groupe`,
+      conversationId: String(conversID),
+    });
+  }
+};
+
+/** Demande acceptée : le nouveau membre est prévenu, même app fermée. */
+const notifyGroupJoinApproved = async (userId, { conversID, name }) => {
+  const groupe = (name || '').trim() || 'un groupe';
+  await sendToUser(userId, {
+    type:           'group_join_approved',
+    title:          'Demande acceptée',
+    body:           `Vous faites désormais partie de « ${groupe} »`,
+    conversationId: String(conversID),
+  });
+};
+
 const notifyMeetingInvite = async (participantId, organiserName, meetingTitle, meetingTime, meetingId, organiserId = null) => {
   await sendToUser(participantId, {
     ...(organiserId ? { aboutUserId: organiserId, aboutName: String(organiserName) } : {}),
@@ -1195,6 +1227,8 @@ const notifyTripReminder = async (trip, { io = null, offsetMin = 0 } = {}) => {
 };
 
 module.exports = {
+  notifyGroupJoinRequest,
+  notifyGroupJoinApproved,
   notifyTripAlert,
   notifyTripClosed,
   notifyTripEtaSoon,

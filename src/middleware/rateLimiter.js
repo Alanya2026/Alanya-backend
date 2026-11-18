@@ -145,7 +145,12 @@ const stickerAnimeLimiter = rateLimit({
   message: { error: 'Trop de stickers animés créés, réessayez plus tard', code: 'RATE_LIMITED' },
 });
 
-module.exports = { authLimiter, registerLimiter, messageLimiter, uploadLimiter, qrResolveLimiter, generalLimiter,
+// Lien d'invitation de groupe. Clé par compte. Les jetons font 96 bits : ces
+// plafonds bornent surtout le bruit (messages système, push aux admins).
+const groupInviteJoinLimiter = limiteStickerPartage(30, 'Trop de liens consultés, patientez un instant');
+const groupInviteManageLimiter = limiteStickerPartage(10, 'Trop de réinitialisations, patientez un instant');
+
+module.exports = { groupInviteJoinLimiter, groupInviteManageLimiter, authLimiter, registerLimiter, messageLimiter, uploadLimiter, qrResolveLimiter, generalLimiter,
   mediaReadLimiter,
   phoneCheckLimiter,
   codeRedeemLimiter,

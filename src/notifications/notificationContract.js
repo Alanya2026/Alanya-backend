@@ -39,6 +39,9 @@ const NOTIFICATION_TYPES = Object.freeze([
   // par jour (socket/state/voicemailNotice.js) — ce n'est pas un avis d'appel
   // manqué, c'est un rappel que l'interrupteur est resté armé.
   'voicemail_active',
+  // Lien d'invitation de groupe avec approbation (migration 116).
+  'group_join_request',
+  'group_join_approved',
 ]);
 
 /**

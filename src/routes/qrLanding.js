@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const { showIdentityLanding, showContactLanding } = require('../controllers/qrLandingController');
 const { showStickerShareLanding } = require('../controllers/stickerLandingController');
+const { showGroupInviteLanding } = require('../controllers/groupInviteLandingController');
 
 const ANDROID_PACKAGE = process.env.QR_ANDROID_PACKAGE || 'com.alanya237.alanya';
 const IOS_BUNDLE_ID = process.env.QR_IOS_BUNDLE_ID || 'com.alanya237.alanya';
@@ -32,7 +33,10 @@ router.get('/q/u/:token', showIdentityLanding);
 /** Lien de partage d'un pack de stickers — cible des liens `…/s/<jeton>`. */
 router.get('/s/:token', showStickerShareLanding);
 
-/** Android App Links (aucune restriction de chemin : `/s/` et `/q/` sont couverts). */
+/** Lien d'invitation de groupe — cible des liens et QR `…/g/<jeton>`. */
+router.get('/g/:token', showGroupInviteLanding);
+
+/** Android App Links (aucune restriction de chemin : `/s/`, `/q/` et `/g/` sont couverts). */
 router.get('/.well-known/assetlinks.json', (_req, res) => {
   if (ANDROID_SHA256.length === 0) {
     return res.status(404).json({ error: 'Association Android non configurée', code: 'APP_LINK_NOT_CONFIGURED' });
@@ -60,7 +64,7 @@ router.get('/.well-known/apple-app-site-association', (_req, res) => {
       details: [
         {
           appID: `${IOS_TEAM_ID}.${IOS_BUNDLE_ID}`,
-          paths: ['/q/u/*', '/q/c/*', '/s/*'],
+          paths: ['/q/u/*', '/q/c/*', '/s/*', '/g/*'],
         },
       ],
     },

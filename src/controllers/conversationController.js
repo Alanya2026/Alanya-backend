@@ -18,6 +18,7 @@ const { masquerDernierMessageEfface } = require('../utils/messageHistoryFilter')
 const { evaluateJoinAckMessage } = require('../utils/groupJoinAck');
 const { canAddUser } = require('../services/privacyPrefsService');
 const { releasePublicFiles, groupPhotosOf } = require('../utils/mediaFile');
+const groupInvite = require('../services/groupInviteService');
 const MAX_BATCH_CONVERSATIONS = 50;
 
 /** Champs par-utilisateur jointés sur cp — inclut consentement / historique (028). */
@@ -668,6 +669,9 @@ const addParticipants = async (req, res, next) => {
       );
     }
 
+    // Un membre qui rajoute un exclu lève l'interdiction de revenir par le lien.
+    await groupInvite.oublierRetrait(Number(id), toAdd);
+
     // Conv enrichie pour la réponse + diffusion temps réel à tous les membres
     // (existants + nouveaux). Les clients upsertent et voient la liste des
     // participants mise à jour.
@@ -872,6 +876,8 @@ const updateGroupSettings = async (req, res, next) => {
       onlyAdminsCanEditInfo,
       hideHistoryForNewMembers,
       onlyAdminsCanAddMembers,
+      onlyAdminsCanShareLink,
+      approveNewMembers,
     } = req.body;
 
     const updates = [];
@@ -913,6 +919,28 @@ const updateGroupSettings = async (req, res, next) => {
         updates.push('onlyAdminsCanAddMembers = ?');
         values.push(next);
         events.push({ lock: 'add', on: next });
+      }
+    }
+
+    // Réglages du lien d'invitation (migration 116) : lus seulement s'ils sont
+    // demandés, pour que les autres réglages ne dépendent pas de la migration.
+    if (onlyAdminsCanShareLink !== undefined || approveNewMembers !== undefined) {
+      const actuels = await groupInvite.lireReglages(conversID);
+      if (onlyAdminsCanShareLink !== undefined) {
+        const next = asFlag(onlyAdminsCanShareLink);
+        if (next !== (actuels?.onlyAdminsCanShareLink ? 1 : 0)) {
+          updates.push('onlyAdminsCanShareLink = ?');
+          values.push(next);
+          events.push({ lock: 'link', on: next });
+        }
+      }
+      if (approveNewMembers !== undefined) {
+        const next = asFlag(approveNewMembers);
+        if (next !== (actuels?.approveNewMembers ? 1 : 0)) {
+          updates.push('approveNewMembers = ?');
+          values.push(next);
+          events.push({ lock: 'approve', on: next });
+        }
       }
     }
 
@@ -1089,6 +1117,9 @@ const removeParticipant = async (req, res, next) => {
       'DELETE FROM conv_participants WHERE conversID = ? AND alanyaID = ?',
       [conversID, targetId],
     );
+    // Trace du retrait : sans elle, l'exclu reviendrait seul par le lien
+    // d'invitation (même faille que celle fermée sur addParticipants).
+    await groupInvite.noterRetrait(conversID, targetId, Number(alanyaID));
 
     // Le fan-out temps réel lit un cache de participants à TTL 60 s, dont la
     // fonction d'invalidation existait sans être appelée nulle part : l'exclu
@@ -1529,4 +1560,7 @@ module.exports = {
   ackGroupJoin,
   removeParticipant,
   setParticipantRole,
+  // Partagés avec groupInviteController (arrivée par lien).
+  loadEnrichedConversation,
+  emitConversationUpdated,
 };

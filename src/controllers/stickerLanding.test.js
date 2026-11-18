@@ -173,7 +173,7 @@ app.use('/', router);
     r = await get('/.well-known/apple-app-site-association');
     assert.strictEqual(r.status, 200);
     const paths = JSON.parse(r.texte).applinks.details[0].paths;
-    assert.deepStrictEqual(paths, ['/q/u/*', '/q/c/*', '/s/*']);
+    assert.deepStrictEqual(paths, ['/q/u/*', '/q/c/*', '/s/*', '/g/*']);
     r = await get('/.well-known/assetlinks.json');
     assert.strictEqual(r.status, 200);
     const cible = JSON.parse(r.texte)[0];
