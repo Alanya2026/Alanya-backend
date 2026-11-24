@@ -16,6 +16,7 @@ const {
   ecritChiffre,
   EnveloppeInvalide,
 } = require('../../../utils/messageEnvelopes');
+const { refusCouverture } = require('../../../utils/conversationDevices');
 const {
   chargeMesAppareils,
   planRoutage,
@@ -123,7 +124,7 @@ async function loadParticipantsExcept(conversationID, senderID) {
 }
 
 function emitSendFailed(socket, {
-  clientId, code, message, feature,
+  clientId, code, message, feature, details,
 }) {
   socket.emit('message:send_failed', {
     clientId: clientId || null,
@@ -131,6 +132,9 @@ function emitSendFailed(socket, {
     message,
     // Seulement pour SUBSCRIPTION_REQUIRED : le panneau de l'offre dit pourquoi.
     ...(feature ? { feature } : {}),
+    // Seulement pour E2EE_APPAREILS_CHANGES : la liste d'appareils à jour,
+    // pour chiffrer à nouveau sans redemander.
+    ...(details ? details : {}),
   });
 }
 
@@ -399,6 +403,34 @@ const messageSend = (io, socket) => {
             : 'Cette conversation n\'est pas chiffrée',
         });
         return;
+      }
+
+      // Fil chiffré à deux : les enveloppes doivent couvrir exactement les
+      // appareils actuels des deux comptes. Le client chiffre avec la liste
+      // qu'il a en mémoire, sans la redemander avant chaque message ; si elle
+      // a vieilli, c'est ici qu'on le voit, et le refus porte la liste à jour
+      // (voir `utils/conversationDevices`, `refusCouverture`).
+      if (chiffre && sendPolicy.isDirect) {
+        const refus = await refusCouverture({
+          conversationID,
+          senderID,
+          monAppareilId: socket.appareilId,
+          enveloppes: chiffre.enveloppes,
+        });
+        if (refus) {
+          emitSendFailed(socket, {
+            clientId,
+            code: 'E2EE_APPAREILS_CHANGES',
+            message: 'La liste des appareils a changé : chiffrer à nouveau',
+            details: {
+              conversationID: Number(conversationID),
+              manquants: refus.manquants,
+              enTrop: refus.enTrop,
+              appareils: refus.appareils,
+            },
+          });
+          return;
+        }
       }
 
       // Sticker : le serveur relit le `sid` en base et réécrit `content`,

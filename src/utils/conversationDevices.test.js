@@ -16,7 +16,7 @@
  */
 
 const assert = require('assert');
-const { evalueCibles } = require('./conversationDevices');
+const { evalueCibles, ecartCouverture } = require('./conversationDevices');
 
 const MOI = 1;
 const MON_APPAREIL = 10;
@@ -180,6 +180,54 @@ r = evalueCibles({
 assert.deepStrictEqual(
   r.cibles,
   [{ appareilId: 20, alanyaID: AUTRE, estMoi: false, identityKey: 'BQcH', capacite: 2 }],
+);
+
+// ── Couverture d'un envoi chiffré ──
+//
+// Le client ne redemande plus la liste avant chaque message : c'est ce
+// contrôle qui rattrape une liste vieillie. Un appareil oublié ne recevrait
+// rien sans le savoir ; une enveloppe pour un appareil révoqué dit que la
+// liste du client est périmée.
+const cibles = [
+  { appareilId: 20, alanyaID: AUTRE, estMoi: false },
+  { appareilId: 11, alanyaID: MOI, estMoi: true },
+];
+
+// Exactement couvert : rien à redire, l'ordre ne compte pas.
+assert.deepStrictEqual(
+  ecartCouverture({ cibles, enveloppes: [{ appareilId: 11 }, { appareilId: 20 }] }),
+  { manquants: [], enTrop: [] },
+);
+
+// Nouvel appareil du correspondant (21), absent de la liste du client.
+assert.deepStrictEqual(
+  ecartCouverture({
+    cibles: [...cibles, { appareilId: 21, alanyaID: AUTRE, estMoi: false }],
+    enveloppes: [{ appareilId: 11 }, { appareilId: 20 }],
+  }),
+  { manquants: [21], enTrop: [] },
+);
+
+// Mon autre appareil oublié : manquant aussi — sans lui, il ne verrait pas
+// ce que j'écris depuis celui-ci.
+assert.deepStrictEqual(
+  ecartCouverture({ cibles, enveloppes: [{ appareilId: 20 }] }),
+  { manquants: [11], enTrop: [] },
+);
+
+// Appareil révoqué (30) encore dans la liste du client.
+assert.deepStrictEqual(
+  ecartCouverture({
+    cibles,
+    enveloppes: [{ appareilId: 11 }, { appareilId: 20 }, { appareilId: 30 }],
+  }),
+  { manquants: [], enTrop: [30] },
+);
+
+// Identifiants en chaîne (JSON) : comparés comme des nombres.
+assert.deepStrictEqual(
+  ecartCouverture({ cibles, enveloppes: [{ appareilId: '11' }, { appareilId: '20' }] }),
+  { manquants: [], enTrop: [] },
 );
 
 console.log('conversationDevices.test.js OK');

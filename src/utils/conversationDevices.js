@@ -98,18 +98,25 @@ async function appareilsDeConversation(conversationID, moiId, monAppareilId) {
     [conversationID, moiId],
   );
   if (membre.length === 0) return null;
+  return lireCibles(conversationID, moiId, monAppareilId);
+}
 
-  // Une seule requête : les appareils actifs de tous les participants, et
-  // pour chacun la présence d'un bundle. La jointure gauche sur
-  // `e2ee_device_keys` évite une seconde lecture pour distinguer
-  // « appareil connu sans clés » de « appareil absent ».
-  //
-  // La clé d'identité et la capacité viennent avec, et c'est voulu : elles
-  // sont publiques, et elles permettent au client de ne demander un bundle —
-  // donc de ne consommer une clé à usage unique — que pour les appareils
-  // sans session, ou dont l'identité a changé depuis (réinstallation). Sans
-  // elles, il faudrait demander le bundle pour savoir, c'est-à-dire
-  // consommer pour lire (docs/e2ee, chapitre 13).
+/**
+ * Les cibles, sans contrôle d'appartenance : l'appelant l'a déjà fait.
+ *
+ * Une seule requête : les appareils actifs de tous les participants, et
+ * pour chacun la présence d'un bundle. La jointure gauche sur
+ * `e2ee_device_keys` évite une seconde lecture pour distinguer
+ * « appareil connu sans clés » de « appareil absent ».
+ *
+ * La clé d'identité et la capacité viennent avec, et c'est voulu : elles
+ * sont publiques, et elles permettent au client de ne demander un bundle —
+ * donc de ne consommer une clé à usage unique — que pour les appareils
+ * sans session, ou dont l'identité a changé depuis (réinstallation). Sans
+ * elles, il faudrait demander le bundle pour savoir, c'est-à-dire
+ * consommer pour lire (docs/e2ee, chapitre 13).
+ */
+async function lireCibles(conversationID, moiId, monAppareilId) {
   const [appareils] = await pool.execute(
     `SELECT a.id, a.alanyaID, (k.appareil_id IS NOT NULL) AS a_des_cles,
             k.identity_key, k.capacite
@@ -138,4 +145,45 @@ async function appareilsDeConversation(conversationID, moiId, monAppareilId) {
   };
 }
 
-module.exports = { evalueCibles, appareilsDeConversation };
+/**
+ * Écart entre les enveloppes d'un envoi et les appareils qui doivent en
+ * recevoir une. Fonction pure.
+ *
+ * C'est ce contrôle qui permet au client de NE PAS redemander la liste
+ * d'appareils avant chaque message : il chiffre avec celle qu'il a en
+ * mémoire, et si elle a vieilli — un appareil ajouté, un autre révoqué — le
+ * serveur le voit ici et refuse, liste à jour jointe. Sans lui, un appareil
+ * apparu depuis la dernière liste ne recevrait rien, sans que personne le
+ * sache.
+ *
+ * @returns {{ manquants: number[], enTrop: number[] }}
+ */
+function ecartCouverture({ cibles, enveloppes }) {
+  const attendus = new Set((cibles || []).map((c) => Number(c.appareilId)));
+  const recus = new Set((enveloppes || []).map((e) => Number(e.appareilId)));
+  return {
+    manquants: [...attendus].filter((id) => !recus.has(id)).sort((a, b) => a - b),
+    enTrop: [...recus].filter((id) => !attendus.has(id)).sort((a, b) => a - b),
+  };
+}
+
+/**
+ * Contrôle de couverture d'un envoi chiffré à DEUX (les groupes passeront
+ * par les chaînes d'expéditeur, où chaque message n'a pas d'enveloppe par
+ * appareil).
+ *
+ * Rend `null` quand les enveloppes couvrent exactement les appareils
+ * attendus, sinon le refus à renvoyer au client : `manquants`, `enTrop`, et
+ * la liste à jour (`appareils`, même forme que `GET /api/e2ee/devices`),
+ * pour que le client chiffre à nouveau sans un aller-retour de plus.
+ */
+async function refusCouverture({ conversationID, senderID, monAppareilId, enveloppes, e2eeSince = null }) {
+  const appareils = await lireCibles(conversationID, senderID, monAppareilId);
+  const ecart = ecartCouverture({ cibles: appareils.cibles, enveloppes });
+  if (ecart.manquants.length === 0 && ecart.enTrop.length === 0) return null;
+  return { ...ecart, appareils: { ...appareils, e2eeSince } };
+}
+
+module.exports = {
+  evalueCibles, appareilsDeConversation, lireCibles, ecartCouverture, refusCouverture,
+};

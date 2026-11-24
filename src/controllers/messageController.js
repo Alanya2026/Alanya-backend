@@ -22,6 +22,7 @@ const {
   ecritChiffre,
   EnveloppeInvalide,
 } = require('../utils/messageEnvelopes');
+const { refusCouverture } = require('../utils/conversationDevices');
 const {
   chargeMesAppareils,
   planRoutage,
@@ -346,6 +347,29 @@ const _persistMessage = async (conn, conversationID, senderID, fields) => {
   });
   if (refusE2ee) throw erreurRefus(refusE2ee);
 
+  // Fil chiffré à deux : les enveloppes couvrent-elles exactement les
+  // appareils actuels ? Même contrôle que `message:send`.
+  if (chiffre && blockEval.isDirect) {
+    const refus = await refusCouverture({
+      conversationID,
+      senderID,
+      monAppareilId: chiffre.emetteurAppareilId,
+      enveloppes: chiffre.enveloppes,
+    });
+    if (refus) {
+      const err = new Error('La liste des appareils a changé : chiffrer à nouveau');
+      err.status = 409;
+      err.code = 'E2EE_APPAREILS_CHANGES';
+      err.details = {
+        conversationID: Number(conversationID),
+        manquants: refus.manquants,
+        enTrop: refus.enTrop,
+        appareils: refus.appareils,
+      };
+      throw err;
+    }
+  }
+
   // Sticker : même fonction que `message:send` (socket). Le serveur relit le
   // `sid` en base ; `content`, `mediaUrl` et `mediaName` du client sont
   // ignorés. Une `StickerMessageError` porte `status`, `code` et `feature` :
@@ -573,6 +597,7 @@ const sendMessage = async (req, res, next) => {
         error: error.message,
         code: error.code,
         ...(error.feature ? { feature: error.feature } : {}),
+        ...(error.details ? error.details : {}),
       });
     }
     next(error);
