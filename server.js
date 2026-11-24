@@ -70,7 +70,7 @@ const qrLoginSocket = require('./src/socket/handlers/qrLogin');
 const { adminOps } = require('./src/socket/handlers/adminOps');
 const {
   joinConversation, messageSend, typingStart, typingStop,
-  messageDelivered, messageRead, e2eeAck,
+  messageDelivered, messageRead, e2eeAck, e2eeResceller, e2eeRenvoi,
   presenceOnline, presenceOffline, handleDisconnect,
 } = require('./src/socket/handlers/chat');
 
@@ -272,6 +272,8 @@ io.on('connection', (socket) => {
   messageDelivered(io, socket, userSockets);
   messageRead(io, socket, userSockets);
   e2eeAck(io, socket);
+  e2eeResceller(io, socket);
+  e2eeRenvoi(io, socket);
   tripSubscribe(io, socket, userSockets);
   tripUnsubscribe(io, socket, userSockets);
   tripPosition(io, socket, userSockets);
