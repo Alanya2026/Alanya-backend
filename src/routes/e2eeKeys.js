@@ -16,6 +16,7 @@ const {
   getKeysState,
   postBundles,
   getConversationDevices,
+  getEnAttente,
 } = require('../controllers/e2eeKeysController');
 
 /**
@@ -170,5 +171,21 @@ router.post('/bundles', auth, requireE2ee, postBundles);
  *       409: { description: E2EE_APPAREIL_INCONNU — reconnexion requise }
  */
 router.get('/devices', auth, requireE2ee, getConversationDevices);
+
+/**
+ * @swagger
+ * /api/e2ee/en-attente:
+ *   get:
+ *     summary: Messages chiffrés dont l'enveloppe de cet appareil n'est pas remise (rattrapage des modifications et renvois manqués)
+ *     tags: [E2EE]
+ *     parameters:
+ *       - in: query
+ *         name: apres
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: "{ messages, hasMore, cursor }" }
+ *       409: { description: E2EE_APPAREIL_INCONNU — reconnexion requise }
+ */
+router.get('/en-attente', auth, requireE2ee, getEnAttente);
 
 module.exports = router;

@@ -22,6 +22,8 @@ const {
 } = require('../services/e2eePrekeyStock');
 const { appareilsDeConversation } = require('../utils/conversationDevices');
 const { activerSiEligible } = require('../services/e2eeActivation');
+const pool = require('../config/db');
+const { attacheChiffre } = require('../utils/messageEnvelopes');
 
 /**
  * Exige un `appareilId` sur le jeton.
@@ -195,7 +197,54 @@ const getConversationDevices = async (req, res) => {
   }
 };
 
+/** Une page de rattrapage : assez pour une longue absence, borné quand même. */
+const EN_ATTENTE_MAX = 100;
+
+/**
+ * GET /api/e2ee/en-attente?apres=<msgID> — les messages chiffrés dont
+ * l'enveloppe de CET appareil n'est pas encore remise.
+ *
+ * C'est le filet de tout ce qui se perd en direct : un message chiffré émis
+ * pendant que la socket était tombée, mais surtout une MODIFICATION ou un
+ * RENVOI (`e2ee:resceller`) d'un message que l'appareil connaît déjà. La
+ * synchronisation par curseur ne ramène que les messages plus récents que
+ * le dernier connu ; un message modifié pendant une absence n'y repasse
+ * jamais. Ici si : le rescellement a posé une enveloppe neuve, non remise.
+ *
+ * Servir n'est pas remettre : l'appareil acquitte par `e2ee:ack` une fois le
+ * message rangé, comme pour l'historique.
+ */
+const getEnAttente = async (req, res) => {
+  const appareilId = exigeAppareil(req, res);
+  if (appareilId == null) return;
+  const apres = Math.max(0, parseInt(req.query.apres, 10) || 0);
+  try {
+    const [lignes] = await pool.query(
+      `SELECT m.*
+         FROM message_envelope v
+         JOIN message m ON m.msgID = v.msgID
+         JOIN conv_participants p ON p.conversID = m.conversationID AND p.alanyaID = ?
+        WHERE v.appareil_id = ? AND v.delivered_at IS NULL
+          AND m.isDeleted = 0 AND m.enc_version = 1 AND m.msgID > ?
+        ORDER BY m.msgID
+        LIMIT ?`,
+      [req.user.alanyaID, appareilId, apres, EN_ATTENTE_MAX + 1],
+    );
+    const hasMore = lignes.length > EN_ATTENTE_MAX;
+    const page = hasMore ? lignes.slice(0, EN_ATTENTE_MAX) : lignes;
+    await attacheChiffre(pool, page, appareilId);
+    res.json({
+      messages: page,
+      hasMore,
+      cursor: page.length > 0 ? Number(page[page.length - 1].msgID) : apres,
+    });
+  } catch (e) {
+    repondErreur(res, e, 'enveloppes en attente');
+  }
+};
+
 module.exports = {
+  getEnAttente,
   deleteKeys,
   postKeys,
   postSignedPreKey,
